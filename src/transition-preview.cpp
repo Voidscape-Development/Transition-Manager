@@ -5,6 +5,7 @@
 #include <obs-frontend-api.h>
 
 #include <QEvent>
+#include <QHideEvent>
 #include <QResizeEvent>
 #include <QShowEvent>
 #include <QWindow>
@@ -253,6 +254,12 @@ void TransitionPreview::showEvent(QShowEvent *event)
 	QWidget::showEvent(event);
 	winId(); // force native window creation
 	createDisplay();
+}
+
+void TransitionPreview::hideEvent(QHideEvent *event)
+{
+	QWidget::hideEvent(event);
+	destroyDisplay(); // no point rendering into a hidden surface
 }
 
 void TransitionPreview::resizeEvent(QResizeEvent *event)

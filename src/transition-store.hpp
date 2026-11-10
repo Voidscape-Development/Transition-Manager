@@ -37,14 +37,16 @@ public:
 
 	std::vector<OBSSource> transitions() const;
 	bool contains(obs_source_t *source) const;
-	bool canRemove(obs_source_t *source) const;
+	// allowActive: the active transition may be removed too; OBS is switched
+	// to another one first (Fade if present), like OBS's own remove button.
+	bool canRemove(obs_source_t *source, bool allowActive = false) const;
 	OBSSource current() const;
 
 	// Returned pointers are borrowed; OBS's list keeps the reference.
 	obs_source_t *createTransition(const char *typeId, const QString &name, obs_data_t *settings = nullptr);
 	obs_source_t *duplicateTransition(obs_source_t *source, const QString &name);
 	bool renameTransition(obs_source_t *source, const QString &name);
-	bool removeTransition(obs_source_t *source);
+	bool removeTransition(obs_source_t *source, bool allowActive = false);
 	bool moveTransition(int from, int to);
 	void setCurrent(obs_source_t *source);
 

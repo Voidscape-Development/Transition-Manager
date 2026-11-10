@@ -1,6 +1,7 @@
-#include "transition-manager-dock.hpp"
+#include "transition-manager-window.hpp"
 
 #include "properties-panel.hpp"
+#include "transition-dialogs.hpp"
 #include "transition-preview.hpp"
 #include "transition-store.hpp"
 
@@ -9,7 +10,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QHBoxLayout>
-#include <QInputDialog>
+#include <QHideEvent>
+#include <QShowEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -31,8 +33,11 @@ static obs_source_t *itemSource(const QListWidgetItem *item)
 	return item ? reinterpret_cast<obs_source_t *>(item->data(kSourceRole).value<quintptr>()) : nullptr;
 }
 
-TransitionManagerDock::TransitionManagerDock(QWidget *parent) : QWidget(parent)
+TransitionManagerWindow::TransitionManagerWindow(QWidget *parent) : QWidget(parent, Qt::Window)
 {
+	setWindowTitle(tr("Transition Manager"));
+	resize(560, 860);
+
 	// --- preview + playback controls
 	preview_ = new TransitionPreview(this);
 
@@ -128,9 +133,9 @@ TransitionManagerDock::TransitionManagerDock(QWidget *parent) : QWidget(parent)
 
 	// --- wiring
 	auto &store = TransitionStore::instance();
-	connect(&store, &TransitionStore::changed, this, &TransitionManagerDock::refreshList);
-	connect(&store, &TransitionStore::currentChanged, this, &TransitionManagerDock::refreshList);
-	connect(&store, &TransitionStore::durationChanged, this, &TransitionManagerDock::onGlobalDurationChanged);
+	connect(&store, &TransitionStore::changed, this, &TransitionManagerWindow::refreshList);
+	connect(&store, &TransitionStore::currentChanged, this, &TransitionManagerWindow::refreshList);
+	connect(&store, &TransitionStore::durationChanged, this, &TransitionManagerWindow::onGlobalDurationChanged);
 	connect(&store, &TransitionStore::scenesChanged, this, [this] {
 		if (preview_->sourceMode() == TransitionPreview::SourceMode::Scenes)
 			preview_->refreshSources();
@@ -147,17 +152,17 @@ TransitionManagerDock::TransitionManagerDock(QWidget *parent) : QWidget(parent)
 		updateButtons();
 	});
 
-	connect(filter_, &QLineEdit::textChanged, this, &TransitionManagerDock::applyFilter);
-	connect(list_, &QListWidget::itemSelectionChanged, this, &TransitionManagerDock::onSelectionChanged);
-	connect(list_, &QListWidget::itemDoubleClicked, this, &TransitionManagerDock::onSetActive);
-	connect(list_, &QListWidget::customContextMenuRequested, this, &TransitionManagerDock::showContextMenu);
-	connect(list_->model(), &QAbstractItemModel::rowsMoved, this, &TransitionManagerDock::onRowsMoved);
-	connect(list_->model(), &QAbstractItemModel::rowsInserted, this, &TransitionManagerDock::onRowsMoved);
+	connect(filter_, &QLineEdit::textChanged, this, &TransitionManagerWindow::applyFilter);
+	connect(list_, &QListWidget::itemSelectionChanged, this, &TransitionManagerWindow::onSelectionChanged);
+	connect(list_, &QListWidget::itemDoubleClicked, this, &TransitionManagerWindow::onSetActive);
+	connect(list_, &QListWidget::customContextMenuRequested, this, &TransitionManagerWindow::showContextMenu);
+	connect(list_->model(), &QAbstractItemModel::rowsMoved, this, &TransitionManagerWindow::onRowsMoved);
+	connect(list_->model(), &QAbstractItemModel::rowsInserted, this, &TransitionManagerWindow::onRowsMoved);
 
-	connect(dupBtn_, &QPushButton::clicked, this, &TransitionManagerDock::onDuplicate);
-	connect(renameBtn_, &QPushButton::clicked, this, &TransitionManagerDock::onRename);
-	connect(removeBtn_, &QPushButton::clicked, this, &TransitionManagerDock::onRemove);
-	connect(activeBtn_, &QPushButton::clicked, this, &TransitionManagerDock::onSetActive);
+	connect(dupBtn_, &QPushButton::clicked, this, &TransitionManagerWindow::onDuplicate);
+	connect(renameBtn_, &QPushButton::clicked, this, &TransitionManagerWindow::onRename);
+	connect(removeBtn_, &QPushButton::clicked, this, &TransitionManagerWindow::onRemove);
+	connect(activeBtn_, &QPushButton::clicked, this, &TransitionManagerWindow::onSetActive);
 
 	connect(props_, &PropertiesPanel::settingsChanged, this, [this] { preview_->syncSettings(props_->source()); });
 
@@ -166,8 +171,8 @@ TransitionManagerDock::TransitionManagerDock(QWidget *parent) : QWidget(parent)
 					       : TransitionPreview::SourceMode::Colors);
 		scrub_->setValue(0);
 	});
-	connect(duration_, &QSpinBox::valueChanged, this, &TransitionManagerDock::onDurationChanged);
-	connect(ownDuration_, &QCheckBox::toggled, this, &TransitionManagerDock::onOwnDurationToggled);
+	connect(duration_, &QSpinBox::valueChanged, this, &TransitionManagerWindow::onDurationChanged);
+	connect(ownDuration_, &QCheckBox::toggled, this, &TransitionManagerWindow::onOwnDurationToggled);
 
 	connect(playBtn_, &QPushButton::clicked, this, [this] {
 		scrub_->setValue(0);
@@ -185,9 +190,42 @@ TransitionManagerDock::TransitionManagerDock(QWidget *parent) : QWidget(parent)
 	refreshList();
 }
 
+// ---- window lifecycle ------------------------------------------------------------
+
+void TransitionManagerWindow::open(obs_source_t *source)
+{
+	if (isMinimized())
+		showNormal();
+	else
+		show();
+	raise();
+	activateWindow();
+
+	if (source)
+		selectSource(source);
+}
+
+void TransitionManagerWindow::showEvent(QShowEvent *event)
+{
+	QWidget::showEvent(event);
+	refreshList(); // recreates the preview copy for the selection
+}
+
+void TransitionManagerWindow::hideEvent(QHideEvent *event)
+{
+	QWidget::hideEvent(event);
+	if (event->spontaneous())
+		return; // minimized: keep state
+
+	// Closed: stop rendering the preview copy and drop its scene references.
+	preview_->setTransition(nullptr);
+	shown_ = nullptr;
+	shownName_.clear();
+}
+
 // ---- list ----------------------------------------------------------------------
 
-obs_source_t *TransitionManagerDock::selected() const
+obs_source_t *TransitionManagerWindow::selected() const
 {
 	QListWidgetItem *item = list_->currentItem();
 	if (!item || !item->isSelected())
@@ -197,7 +235,7 @@ obs_source_t *TransitionManagerDock::selected() const
 	return TransitionStore::instance().contains(source) ? source : nullptr;
 }
 
-void TransitionManagerDock::refreshList()
+void TransitionManagerWindow::refreshList()
 {
 	if (reordering_)
 		return;
@@ -248,7 +286,7 @@ void TransitionManagerDock::refreshList()
 	onSelectionChanged();
 }
 
-void TransitionManagerDock::applyFilter()
+void TransitionManagerWindow::applyFilter()
 {
 	const QString text = filter_->text().trimmed();
 	for (int i = 0; i < list_->count(); ++i) {
@@ -264,7 +302,7 @@ void TransitionManagerDock::applyFilter()
 	list_->setDragDropMode(canDrag ? QAbstractItemView::InternalMove : QAbstractItemView::NoDragDrop);
 }
 
-void TransitionManagerDock::onRowsMoved()
+void TransitionManagerWindow::onRowsMoved()
 {
 	if (refreshing_ || reordering_)
 		return;
@@ -295,7 +333,7 @@ void TransitionManagerDock::onRowsMoved()
 	});
 }
 
-void TransitionManagerDock::selectSource(obs_source_t *source)
+void TransitionManagerWindow::selectSource(obs_source_t *source)
 {
 	for (int i = 0; i < list_->count(); ++i) {
 		QListWidgetItem *item = list_->item(i);
@@ -309,8 +347,13 @@ void TransitionManagerDock::selectSource(obs_source_t *source)
 	}
 }
 
-void TransitionManagerDock::onSelectionChanged()
+void TransitionManagerWindow::onSelectionChanged()
 {
+	// Nothing to render or edit while the window is closed; showEvent
+	// catches up when it opens again.
+	if (!isVisible())
+		return;
+
 	obs_source_t *source = selected();
 	if (source != shown_) {
 		shown_ = source;
@@ -325,7 +368,7 @@ void TransitionManagerDock::onSelectionChanged()
 	updateButtons();
 }
 
-void TransitionManagerDock::updateButtons()
+void TransitionManagerWindow::updateButtons()
 {
 	auto &store = TransitionStore::instance();
 	obs_source_t *source = selected();
@@ -348,7 +391,7 @@ void TransitionManagerDock::updateButtons()
 		removeBtn_->setToolTip(QString());
 }
 
-void TransitionManagerDock::showContextMenu(const QPoint &pos)
+void TransitionManagerWindow::showContextMenu(const QPoint &pos)
 {
 	QListWidgetItem *item = list_->itemAt(pos);
 	if (!item)
@@ -356,17 +399,18 @@ void TransitionManagerDock::showContextMenu(const QPoint &pos)
 	list_->setCurrentItem(item);
 
 	QMenu menu(this);
-	menu.addAction(tr("Set active"), this, &TransitionManagerDock::onSetActive)->setEnabled(activeBtn_->isEnabled());
+	menu.addAction(tr("Set active"), this, &TransitionManagerWindow::onSetActive)
+		->setEnabled(activeBtn_->isEnabled());
 	menu.addSeparator();
-	menu.addAction(tr("Duplicate"), this, &TransitionManagerDock::onDuplicate)->setEnabled(dupBtn_->isEnabled());
-	menu.addAction(tr("Rename"), this, &TransitionManagerDock::onRename)->setEnabled(renameBtn_->isEnabled());
-	menu.addAction(tr("Remove"), this, &TransitionManagerDock::onRemove)->setEnabled(removeBtn_->isEnabled());
+	menu.addAction(tr("Duplicate"), this, &TransitionManagerWindow::onDuplicate)->setEnabled(dupBtn_->isEnabled());
+	menu.addAction(tr("Rename"), this, &TransitionManagerWindow::onRename)->setEnabled(renameBtn_->isEnabled());
+	menu.addAction(tr("Remove"), this, &TransitionManagerWindow::onRemove)->setEnabled(removeBtn_->isEnabled());
 	menu.exec(list_->viewport()->mapToGlobal(pos));
 }
 
 // ---- durations -------------------------------------------------------------------
 
-void TransitionManagerDock::updateDurationControls()
+void TransitionManagerWindow::updateDurationControls()
 {
 	auto &store = TransitionStore::instance();
 	obs_source_t *source = selected();
@@ -383,7 +427,7 @@ void TransitionManagerDock::updateDurationControls()
 	duration_->setToolTip(fixed ? tr("This transition has a fixed length") : QString());
 }
 
-void TransitionManagerDock::onOwnDurationToggled(bool on)
+void TransitionManagerWindow::onOwnDurationToggled(bool on)
 {
 	auto &store = TransitionStore::instance();
 	obs_source_t *source = selected();
@@ -400,14 +444,14 @@ void TransitionManagerDock::onOwnDurationToggled(bool on)
 	refreshList(); // update tooltips
 }
 
-void TransitionManagerDock::onDurationChanged(int ms)
+void TransitionManagerWindow::onDurationChanged(int ms)
 {
 	// Without "Own duration", the box only sets the preview length.
 	if (ownDuration_->isChecked())
 		TransitionStore::instance().setDefaultDuration(selected(), ms);
 }
 
-void TransitionManagerDock::onGlobalDurationChanged()
+void TransitionManagerWindow::onGlobalDurationChanged()
 {
 	if (ownDuration_->isChecked())
 		return;
@@ -417,7 +461,7 @@ void TransitionManagerDock::onGlobalDurationChanged()
 
 // ---- actions -------------------------------------------------------------------
 
-void TransitionManagerDock::populateNewMenu(QMenu *menu)
+void TransitionManagerWindow::populateNewMenu(QMenu *menu)
 {
 	menu->clear();
 	const char *id = nullptr;
@@ -437,7 +481,7 @@ void TransitionManagerDock::populateNewMenu(QMenu *menu)
 		menu->addAction(tr("No configurable transition types available"))->setEnabled(false);
 }
 
-void TransitionManagerDock::onCreate(const QString &typeId)
+void TransitionManagerWindow::onCreate(const QString &typeId)
 {
 	const QByteArray id = typeId.toUtf8();
 	const char *display = obs_source_get_display_name(id.constData());
@@ -449,7 +493,7 @@ void TransitionManagerDock::onCreate(const QString &typeId)
 		QMessageBox::warning(this, tr("New transition"), tr("The transition couldn't be created."));
 }
 
-void TransitionManagerDock::onDuplicate()
+void TransitionManagerWindow::onDuplicate()
 {
 	obs_source_t *source = selected();
 	if (!source)
@@ -460,49 +504,17 @@ void TransitionManagerDock::onDuplicate()
 		selectSource(copy);
 }
 
-void TransitionManagerDock::onRename()
+void TransitionManagerWindow::onRename()
 {
-	obs_source_t *source = selected();
-	if (!source)
-		return;
-
-	auto &store = TransitionStore::instance();
-	QString name = QString::fromUtf8(obs_source_get_name(source));
-	for (;;) {
-		bool ok = false;
-		name = QInputDialog::getText(this, tr("Rename transition"), tr("Name:"), QLineEdit::Normal, name, &ok);
-		if (!ok)
-			return;
-		name = name.trimmed();
-		if (name.isEmpty()) {
-			QMessageBox::warning(this, tr("Rename transition"), tr("Please enter a name."));
-			continue;
-		}
-		if (store.nameTaken(name, source)) {
-			QMessageBox::warning(this, tr("Rename transition"),
-					     tr("A transition named \"%1\" already exists.").arg(name));
-			continue;
-		}
-		break;
-	}
-	store.renameTransition(source, name);
+	TransitionDialogs::rename(this, selected());
 }
 
-void TransitionManagerDock::onRemove()
+void TransitionManagerWindow::onRemove()
 {
-	obs_source_t *source = selected();
-	if (!source || !TransitionStore::instance().canRemove(source))
-		return;
-	const auto answer = QMessageBox::question(
-		this, tr("Remove transition"),
-		tr("Remove \"%1\"? This can't be undone.\n\nQuick transition buttons that use it keep working until "
-		   "OBS restarts.")
-			.arg(QString::fromUtf8(obs_source_get_name(source))));
-	if (answer == QMessageBox::Yes)
-		TransitionStore::instance().removeTransition(source);
+	TransitionDialogs::remove(this, selected(), false);
 }
 
-void TransitionManagerDock::onSetActive()
+void TransitionManagerWindow::onSetActive()
 {
 	if (obs_source_t *source = selected())
 		TransitionStore::instance().setCurrent(source);

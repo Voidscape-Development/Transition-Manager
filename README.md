@@ -1,15 +1,31 @@
 # Transition Manager for OBS Studio
 
-A dock for creating, editing, previewing, duplicating, renaming, reordering and
-removing OBS Studio scene transitions, without opening OBS's transition
-properties window.
+A **Transition Manager** dock that works like OBS's own Scene Transitions dock,
+plus a full **Transition Manager window** for creating, editing, previewing,
+duplicating, renaming, reordering and removing scene transitions.
 
 Targets OBS 30+ (uses `obs_frontend_add_dock_by_id`) and Qt 6. Built on the
 [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate).
 
-## Features
+## The dock
 
-- **One list, shared with OBS.** The dock shows exactly the transitions in OBS's
+Enable it from **Docks → Transition Manager**. It mirrors OBS's Scene
+Transitions dock:
+
+- A dropdown to pick the active transition and a **Duration** box (hidden for
+  fixed-length transitions, as in OBS).
+- **+** asks for a name, adds the transition, makes it active and opens it in
+  the Transition Manager window. That window is where its settings live.
+- **Trash** removes the active transition after switching OBS to Fade (or
+  another transition). Built-in Cut and Fade can't be removed.
+- **⋮** has Rename, Duplicate, Properties (opens the window on this
+  transition) and Open Transition Manager.
+- **Open Transition Manager** opens the full window on the active transition.
+  It's also in **Tools → Transition Manager**.
+
+## The Transition Manager window
+
+- **One list, shared with OBS.** The window and dock show exactly the transitions in OBS's
   Scene Transitions dropdown, in the same order. Transitions created here go
   into that dropdown the same way OBS's **+** button adds them. OBS saves them
   with the scene collection, and they work everywhere OBS uses transitions:
@@ -19,7 +35,7 @@ Targets OBS 30+ (uses `obs_frontend_add_dock_by_id`) and Qt 6. Built on the
   driving your program output. It can run between two test colors, or from your
   program scene to your preview scene (outside studio mode: the next scene in
   the list).
-- **Settings editor.** The dock builds a form from the transition's own
+- **Settings editor.** The window builds a form from the transition's own
   properties. Every OBS property type is supported, including fonts, editable
   lists, frame rates and sliders. Fields that appear or hide based on other
   settings (Stinger, Luma Wipe, …) update as you edit. Changes apply to the real
@@ -36,20 +52,23 @@ Targets OBS 30+ (uses `obs_frontend_add_dock_by_id`) and Qt 6. Built on the
 ### Rules
 
 - Removing follows OBS's own rules: built-in transitions without settings (Cut,
-  Fade) can't be removed. The active transition can't be removed either, so
-  switch away from it first.
+  Fade) can't be removed. In the window, the active transition can't be removed
+  either, so switch away from it first. The dock's trash button switches away
+  for you, like OBS's.
 - Names must be unique, as in OBS.
 
 ## Layout
 
 | File | Role |
 |---|---|
-| `src/plugin-main.cpp` | Module entry. Registers the dock and starts the store |
+| `src/plugin-main.cpp` | Module entry. Starts the store, creates the window, registers the dock and the Tools menu item |
+| `src/transitions-dock.*` | The compact dock modelled on OBS's Scene Transitions dock |
+| `src/transition-manager-window.*` | The full window: preview, list, actions and settings |
+| `src/transition-dialogs.*` | Name, rename and remove prompts shared by the dock and the window |
 | `src/transition-store.*` | Reads and edits OBS's transition list, hooks transitions it creates into OBS's scene-switch signals, and saves per-transition durations under the `transition_manager` key of the scene collection |
 | `src/obs-qt-types.hpp` | Declares the `OBSSource` Qt metatype under the same name OBS uses, so entries added here are readable by OBS |
 | `src/transition-preview.*` | Native `obs_display` that renders a private copy of the selected transition between test colors or real scenes |
 | `src/properties-panel.*` | Builds Qt widgets from `obs_properties_t` and writes changes back |
-| `src/transition-manager-dock.*` | The dock: preview, list, actions and settings |
 
 ## Building
 
@@ -80,18 +99,19 @@ macOS signing work exactly as in the plugin template. See the
 - **Relies on OBS's widget layout.** No public API adds a transition to OBS's
   list, so the store finds the main window's `transitions` combo box and checks
   it matches what `obs_frontend_get_transitions` reports before writing to it.
-  If a future OBS version changes this, the dock shows a note and turns off
-  New/Duplicate/Rename/Remove/reorder. Settings, preview and switching keep
+  If a future OBS version changes this, the window shows a note, and adding,
+  duplicating, renaming, removing and reordering are turned off in both the
+  dock and the window. Settings, preview and switching keep
   working.
 - **No list-changed event for others.** OBS doesn't let plugins raise
   `OBS_FRONTEND_EVENT_TRANSITION_LIST_CHANGED`, so other plugins (and
-  obs-websocket clients) aren't told when this dock adds, renames, removes or
+  obs-websocket clients) aren't told when this plugin adds, renames, removes or
   reorders a transition. OBS's own menus read the list when they open, so they
   are unaffected.
 - **Quick transitions.** Removing a transition used by a quick-transition button
   leaves that button working with the removed transition until OBS restarts.
 - **Durations are stored by name,** the same way OBS stores per-scene transition
-  overrides. Renaming in this dock carries the duration over. Renaming in OBS's
+  overrides. Renaming in this plugin carries the duration over. Renaming in OBS's
   own dialog doesn't.
 - **Wayland.** The preview surface is wired for Windows, macOS and Linux/X11.
   On Wayland the preview stays blank (everything else works).

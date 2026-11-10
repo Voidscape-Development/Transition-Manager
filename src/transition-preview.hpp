@@ -38,6 +38,7 @@ public:
 
 protected:
 	void showEvent(QShowEvent *event) override;
+	void hideEvent(QHideEvent *event) override;
 	void resizeEvent(QResizeEvent *event) override;
 	void paintEvent(QPaintEvent *) override {}
 	bool event(QEvent *event) override;

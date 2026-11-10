@@ -7,6 +7,7 @@
 #include <QMainWindow>
 #include <QSignalBlocker>
 #include <algorithm>
+#include <cstring>
 
 static const char *kSaveKey = "transition_manager";
 
@@ -109,12 +110,16 @@ bool TransitionStore::contains(obs_source_t *source) const
 	return false;
 }
 
-bool TransitionStore::canRemove(obs_source_t *source) const
+bool TransitionStore::canRemove(obs_source_t *source, bool allowActive) const
 {
-	// Same rules as OBS's own remove button (Cut, Fade and other
-	// unconfigurable transitions are built in), plus: never pull the
-	// active transition out from under the program output.
-	return source && canEditList() && obs_source_configurable(source) && current().Get() != source;
+	// Same rules as OBS's own remove button: Cut, Fade and other
+	// unconfigurable transitions are built in. Unless allowActive, never pull
+	// the active transition out from under the program output.
+	if (!source || !canEditList() || !obs_source_configurable(source))
+		return false;
+	if (current().Get() != source)
+		return true;
+	return allowActive && transitions().size() > 1;
 }
 
 OBSSource TransitionStore::current() const
@@ -215,10 +220,26 @@ bool TransitionStore::renameTransition(obs_source_t *source, const QString &name
 	return true;
 }
 
-bool TransitionStore::removeTransition(obs_source_t *source)
+bool TransitionStore::removeTransition(obs_source_t *source, bool allowActive)
 {
-	if (!canRemove(source))
+	if (!canRemove(source, allowActive))
 		return false;
+
+	if (current().Get() == source) {
+		// Switch away first so the output never loses its transition.
+		OBSSource fallback;
+		for (const OBSSource &s : transitions()) {
+			if (s.Get() == source)
+				continue;
+			if (!fallback || strcmp(obs_source_get_id(s), "fade_transition") == 0)
+				fallback = s;
+			if (strcmp(obs_source_get_id(s), "fade_transition") == 0)
+				break;
+		}
+		setCurrent(fallback);
+		if (current().Get() == source)
+			return false;
+	}
 
 	const int idx = comboIndexOf(source);
 	if (idx < 0)

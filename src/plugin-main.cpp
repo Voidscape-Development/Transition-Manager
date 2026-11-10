@@ -22,8 +22,9 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 
 #include <QMainWindow>
 
-#include "transition-manager-dock.hpp"
+#include "transition-manager-window.hpp"
 #include "transition-store.hpp"
+#include "transitions-dock.hpp"
 
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
@@ -43,13 +44,20 @@ bool obs_module_load(void)
 	TransitionStore::instance().init();
 
 	auto *main = static_cast<QMainWindow *>(obs_frontend_get_main_window());
-	auto *dock = new TransitionManagerDock(main);
+
+	// The full editor is a separate window, owned by the main window and
+	// hidden until opened from the dock or the Tools menu.
+	auto *window = new TransitionManagerWindow(main);
+	auto *dock = new TransitionsDock(window, main);
 
 	// OBS 30+: OBS takes ownership of the widget.
 	if (!obs_frontend_add_dock_by_id("transition_manager_dock", "Transition Manager", dock)) {
 		obs_log(LOG_WARNING, "failed to add dock");
 		delete dock;
 	}
+
+	obs_frontend_add_tools_menu_item(
+		"Transition Manager", [](void *data) { static_cast<TransitionManagerWindow *>(data)->open(); }, window);
 
 	obs_log(LOG_INFO, "plugin loaded successfully (version %s)", PLUGIN_VERSION);
 	return true;

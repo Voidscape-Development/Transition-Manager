@@ -47,8 +47,12 @@ target_sources(
     src/transition-preview.cpp
     src/properties-panel.hpp
     src/properties-panel.cpp
-    src/transition-manager-dock.hpp
-    src/transition-manager-dock.cpp
+    src/transition-manager-window.hpp
+    src/transition-manager-window.cpp
+    src/transition-dialogs.hpp
+    src/transition-dialogs.cpp
+    src/transitions-dock.hpp
+    src/transitions-dock.cpp
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

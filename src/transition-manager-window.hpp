@@ -16,13 +16,21 @@ class QToolButton;
 class TransitionPreview;
 class PropertiesPanel;
 
-// Main UI: live preview + controls on top, searchable/reorderable transition
-// list in the middle, generated settings panel at the bottom.
-class TransitionManagerDock : public QWidget {
+// The full Transition Manager window: live preview + controls on top,
+// searchable/reorderable transition list in the middle, generated settings
+// panel at the bottom. Opened from the Transitions dock or the Tools menu.
+class TransitionManagerWindow : public QWidget {
 	Q_OBJECT
 
 public:
-	explicit TransitionManagerDock(QWidget *parent = nullptr);
+	explicit TransitionManagerWindow(QWidget *parent = nullptr);
+
+	// Show, raise and focus the window, selecting `source` if given.
+	void open(obs_source_t *source = nullptr);
+
+protected:
+	void showEvent(QShowEvent *event) override;
+	void hideEvent(QHideEvent *event) override;
 
 private slots:
 	void refreshList();
