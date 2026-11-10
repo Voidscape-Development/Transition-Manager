@@ -33,8 +33,14 @@ public:
 	void scrub(float t); // 0.0 - 1.0
 	void reset();
 
+	// Display names of the current endpoints, e.g. "Gameplay" or "Test color".
+	QString fromName() const;
+	QString toName() const;
+
 	QPaintEngine *paintEngine() const override { return nullptr; }
-	QSize sizeHint() const override { return QSize(320, 180); }
+	QSize sizeHint() const override { return QSize(480, 270); }
+	bool hasHeightForWidth() const override { return true; }
+	int heightForWidth(int w) const override { return w * 9 / 16; }
 
 protected:
 	void showEvent(QShowEvent *event) override;

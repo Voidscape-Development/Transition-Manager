@@ -29,7 +29,9 @@ TransitionPreview::TransitionPreview(QWidget *parent) : QWidget(parent)
 	setAttribute(Qt::WA_DontCreateNativeAncestors);
 	setAttribute(Qt::WA_NativeWindow);
 	setMinimumHeight(140);
-	setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+	QSizePolicy policy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+	policy.setHeightForWidth(true);
+	setSizePolicy(policy);
 
 	createTestSources();
 	updateEndpoints();
@@ -97,6 +99,23 @@ void TransitionPreview::updateEndpoints()
 
 	sourceA_ = a;
 	sourceB_ = b;
+}
+
+static QString endpointName(obs_source_t *source, obs_source_t *colorA, obs_source_t *colorB)
+{
+	if (!source || source == colorA || source == colorB)
+		return QObject::tr("Test color");
+	return QString::fromUtf8(obs_source_get_name(source));
+}
+
+QString TransitionPreview::fromName() const
+{
+	return endpointName(sourceA_, colorA_, colorB_);
+}
+
+QString TransitionPreview::toName() const
+{
+	return endpointName(sourceB_, colorA_, colorB_);
 }
 
 void TransitionPreview::setSourceMode(SourceMode mode)

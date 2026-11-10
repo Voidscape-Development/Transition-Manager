@@ -22,11 +22,19 @@
 #include <QSpinBox>
 #include <QStandardItemModel>
 #include <QVBoxLayout>
+#include <QButtonGroup>
+#include <QGridLayout>
+#include <QHash>
+#include <QPixmap>
+#include <QToolButton>
+
+#include <obs-module.h>
 
 #include <media-io/frame-rate.h>
 
 #include <climits>
 #include <cmath>
+#include <cstring>
 
 // ---- helpers --------------------------------------------------------------
 
@@ -173,27 +181,18 @@ void PropertiesPanel::rebuild()
 	props_.reset();
 
 	auto *container = new QWidget;
+	container->setAutoFillBackground(false);
 	auto *outer = new QVBoxLayout(container);
+	outer->setContentsMargins(16, 14, 16, 16);
 
 	if (!source_) {
-		auto *empty = new QLabel(tr("Select a transition to edit its settings."));
-		empty->setAlignment(Qt::AlignCenter);
-		empty->setEnabled(false);
-		outer->addWidget(empty);
 		outer->addStretch();
 		setWidget(container);
 		return;
 	}
 
-	const char *typeId = obs_source_get_id(source_);
-	auto *header = new QLabel(QStringLiteral("<b>%1</b> &nbsp;<span style='opacity:0.6'>%2</span>")
-					  .arg(QString::fromUtf8(obs_source_get_name(source_)).toHtmlEscaped(),
-					       QString::fromUtf8(obs_source_get_display_name(typeId)).toHtmlEscaped()));
-	outer->addWidget(header);
-
 	props_.reset(obs_source_properties(source_));
-	auto *form = new QFormLayout;
-	form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+	auto *form = makeForm();
 
 	if (props_) {
 		// Runs every modified callback once so visibility starts correct.
@@ -202,14 +201,13 @@ void PropertiesPanel::rebuild()
 			addProperty(p, form);
 	}
 
-	if (form->rowCount() == 0)
-		form->addRow(new QLabel(tr("This transition has no settings.")));
+	if (form->rowCount() == 0) {
+		auto *none = new QLabel(tr("This transition has no settings."));
+		none->setProperty("tmRole", "muted");
+		form->addRow(none);
+	}
 
 	outer->addLayout(form);
-
-	auto *resetBtn = new QPushButton(tr("Reset to defaults"));
-	connect(resetBtn, &QPushButton::clicked, this, &PropertiesPanel::resetToDefaults);
-	outer->addWidget(resetBtn, 0, Qt::AlignRight);
 	outer->addStretch();
 
 	setWidget(container);
@@ -412,7 +410,18 @@ void PropertiesPanel::addProperty(obs_property_t *prop, QFormLayout *layout)
 	}
 
 	case OBS_PROPERTY_LIST: {
+		// Luma Wipe's image list gets a thumbnail picker instead of a combo.
+		if (strcmp(obs_source_get_id(source_), "wipe_transition") == 0 && key == "luma_image" &&
+		    obs_property_list_format(prop) == OBS_COMBO_FORMAT_STRING) {
+			if (QWidget *grid = makeLumaPicker(prop, key)) {
+				field = grid;
+				break;
+			}
+		}
+
 		auto *combo = new QComboBox;
+		combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+		combo->setMinimumContentsLength(8);
 		const obs_combo_format format = obs_property_list_format(prop);
 		const bool editable = obs_property_list_type(prop) == OBS_COMBO_TYPE_EDITABLE;
 		combo->setEditable(editable);
@@ -508,7 +517,8 @@ void PropertiesPanel::addProperty(obs_property_t *prop, QFormLayout *layout)
 
 	case OBS_PROPERTY_GROUP: {
 		auto *box = new QGroupBox(label);
-		auto *inner = new QFormLayout(box);
+		auto *inner = makeForm();
+		box->setLayout(inner);
 		if (obs_property_group_type(prop) == OBS_GROUP_CHECKABLE) {
 			box->setCheckable(true);
 			box->setChecked(obs_data_get_bool(settings_, key));
@@ -713,6 +723,8 @@ QWidget *PropertiesPanel::makeEditableListField(obs_property_t *prop, const QByt
 QWidget *PropertiesPanel::makeFrameRateField(obs_property_t *prop, const QByteArray &key)
 {
 	auto *combo = new QComboBox;
+	combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+	combo->setMinimumContentsLength(8);
 
 	// Named options first (e.g. "Same as output").
 	const size_t optionCount = obs_property_frame_rate_options_count(prop);
@@ -789,4 +801,108 @@ QWidget *PropertiesPanel::makeFrameRateField(obs_property_t *prop, const QByteAr
 		combo->setEnabled(false);
 	}
 	return combo;
+}
+
+// ---- layout -----------------------------------------------------------------
+
+QFormLayout *PropertiesPanel::makeForm()
+{
+	// Labels sit above their fields: easier to scan in a narrow column and
+	// long labels never squeeze the controls.
+	auto *form = new QFormLayout;
+	form->setRowWrapPolicy(QFormLayout::WrapAllRows);
+	form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+	form->setLabelAlignment(Qt::AlignLeft);
+	form->setVerticalSpacing(10);
+	return form;
+}
+
+// ---- Luma Wipe image picker -------------------------------------------------
+
+static QPixmap lumaThumbnail(const QString &file)
+{
+	static QHash<QString, QPixmap> cache;
+	auto it = cache.constFind(file);
+	if (it != cache.constEnd())
+		return *it;
+
+	QPixmap thumb;
+	if (obs_module_t *module = obs_get_module("obs-transitions")) {
+		const QByteArray rel = (QStringLiteral("luma_wipes/") + file).toUtf8();
+		if (char *path = obs_find_module_file(module, rel.constData())) {
+			QPixmap full(QString::fromUtf8(path));
+			bfree(path);
+			if (!full.isNull())
+				thumb = full.scaled(QSize(96, 54), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+		}
+	}
+	cache.insert(file, thumb);
+	return thumb;
+}
+
+QWidget *PropertiesPanel::makeLumaPicker(obs_property_t *prop, const QByteArray &key)
+{
+	const size_t count = obs_property_list_item_count(prop);
+	if (count == 0)
+		return nullptr;
+
+	// Fall back to the plain combo box if the images can't be found.
+	if (lumaThumbnail(QString::fromUtf8(obs_property_list_item_string(prop, 0))).isNull())
+		return nullptr;
+
+	const QString current = QString::fromUtf8(obs_data_get_string(settings_, key));
+
+	auto *container = new QWidget;
+	auto *v = new QVBoxLayout(container);
+	v->setContentsMargins(0, 0, 0, 0);
+	v->setSpacing(6);
+
+	auto *name = new QLabel;
+	name->setProperty("tmRole", "muted");
+	v->addWidget(name);
+
+	auto *gridHost = new QWidget;
+	auto *grid = new QGridLayout(gridHost);
+	grid->setContentsMargins(0, 0, 0, 0);
+	grid->setSpacing(6);
+	v->addWidget(gridHost);
+
+	auto *group = new QButtonGroup(container);
+	group->setExclusive(true);
+
+	constexpr int kColumns = 5;
+	int selectedIndex = -1;
+	for (size_t i = 0; i < count; ++i) {
+		const QString value = QString::fromUtf8(obs_property_list_item_string(prop, i));
+		const QString label = QString::fromUtf8(obs_property_list_item_name(prop, i));
+
+		auto *button = new QToolButton;
+		button->setProperty("tmRole", "thumb");
+		button->setCheckable(true);
+		button->setIcon(QIcon(lumaThumbnail(value)));
+		button->setIconSize(QSize(40, 22));
+		button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+		button->setToolTip(label);
+		button->setAccessibleName(label);
+		button->setAutoRaise(false);
+		group->addButton(button, (int)i);
+		grid->addWidget(button, (int)i / kColumns, (int)i % kColumns);
+
+		if (value == current) {
+			button->setChecked(true);
+			name->setText(label);
+			selectedIndex = (int)i;
+		}
+
+		connect(button, &QToolButton::clicked, this, [this, prop, key, value, label, name] {
+			obs_data_set_string(settings_, key, value.toUtf8().constData());
+			name->setText(label);
+			commit(prop);
+		});
+	}
+
+	// Like the combo: no match means OBS falls back to the first image.
+	if (selectedIndex < 0)
+		group->button(0)->click();
+	return container;
 }

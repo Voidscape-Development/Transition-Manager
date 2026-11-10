@@ -25,29 +25,42 @@ Transitions dock:
 
 ## The Transition Manager window
 
-- **One list, shared with OBS.** The window and dock show exactly the transitions in OBS's
-  Scene Transitions dropdown, in the same order. Transitions created here go
-  into that dropdown the same way OBS's **+** button adds them. OBS saves them
-  with the scene collection, and they work everywhere OBS uses transitions:
-  scene switches, studio mode, quick transitions and per-scene overrides.
-- **Live preview.** Each selected transition gets a private copy that you can
-  play or scrub with the slider. The preview never touches the transition
-  driving your program output. It can run between two test colors, or from your
-  program scene to your preview scene (outside studio mode: the next scene in
-  the list).
-- **Settings editor.** The window builds a form from the transition's own
-  properties. Every OBS property type is supported, including fonts, editable
+A sidebar lists every transition; the rest of the window edits the selected
+one, with the preview next to its settings so you see each change as you
+make it.
+
+- **Sidebar.** Built-in transitions (Cut, Fade) are grouped separately with a
+  lock, since they can't be removed. Custom transitions follow, in OBS's order.
+  The active transition has a green **Active** badge, and transitions with
+  their own duration show it as a chip. Filter by name or type, drag custom
+  transitions to reorder them (OBS's dropdown follows), and use **New** to add
+  one. Right-click a transition for its actions.
+- **One list, shared with OBS.** These are exactly the transitions in OBS's
+  Scene Transitions dropdown. Transitions created here go into that dropdown
+  the same way OBS's **+** button adds them. OBS saves them with the scene
+  collection, and they work everywhere OBS uses transitions: scene switches,
+  studio mode, quick transitions and per-scene overrides.
+- **Header.** The name with a rename button, its type and whether it's
+  active, **Duplicate**, **Make active** (or an *Active in OBS* label), and a
+  **⋮** menu with Rename, Duplicate and Remove.
+- **Live preview.** A private copy of the transition that you can play, loop
+  or scrub, with the elapsed and total time. It never touches the transition
+  driving your program output. Preview between two test colors, or from the
+  program scene to the preview scene (outside studio mode: the next scene in
+  the list). For a Stinger, the length comes from its video and the scrubber
+  marks where the scene cuts.
+- **Duration.** Choose **OBS default** or **Custom**. A custom duration is
+  applied to OBS whenever the transition becomes active, and saved per scene
+  collection. Fixed-length transitions (Cut, Stinger) explain their length
+  instead.
+- **Settings.** A form built from the transition's own properties, with labels
+  above fields. Every OBS property type is supported, including fonts, editable
   lists, frame rates and sliders. Fields that appear or hide based on other
-  settings (Stinger, Luma Wipe, …) update as you edit. Changes apply to the real
-  transition immediately and are mirrored into the preview.
-- **New / Duplicate / Rename / Remove / Set active.** Available from the buttons
-  or the right-click menu, and double-clicking a transition sets it active.
-  Duplicating deep-copies its settings.
-- **Search and reorder.** Filter by name or type, and drag to reorder. OBS's
-  dropdown follows the new order.
-- **Per-transition durations.** Tick **Own duration** to remember a duration
-  for the selected transition. Whenever that transition becomes active, OBS's
-  duration box is set to it. Saved per scene collection.
+  settings update as you edit. Luma Wipe's image is picked from thumbnails of
+  the actual wipe images. Changes apply immediately and are mirrored into the
+  preview.
+- **Theme-aware.** Colors and icons come from the current OBS theme, light or
+  dark, and update when you switch themes.
 
 ### Rules
 
@@ -63,7 +76,11 @@ Transitions dock:
 |---|---|
 | `src/plugin-main.cpp` | Module entry. Starts the store, creates the window, registers the dock and the Tools menu item |
 | `src/transitions-dock.*` | The compact dock modelled on OBS's Scene Transitions dock |
-| `src/transition-manager-window.*` | The full window: preview, list, actions and settings |
+| `src/transition-manager-window.*` | The full window: sidebar list, header actions, preview, duration and settings |
+| `src/transition-list.*` | Item roles and painting for the sidebar list (sections, type icons, badges) |
+| `src/tm-style.*` | Palette-derived colors, SVG icons and the window style sheet |
+| `src/timeline-slider.hpp` | Scrub slider that can mark a Stinger's transition point |
+| `src/media-probe.*` | Measures a Stinger video's length and frame count the same way the Stinger does |
 | `src/transition-dialogs.*` | Name, rename and remove prompts shared by the dock and the window |
 | `src/transition-store.*` | Reads and edits OBS's transition list, hooks transitions it creates into OBS's scene-switch signals, and saves per-transition durations under the `transition_manager` key of the scene collection |
 | `src/obs-qt-types.hpp` | Declares the `OBSSource` Qt metatype under the same name OBS uses, so entries added here are readable by OBS |

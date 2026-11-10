@@ -53,6 +53,13 @@ target_sources(
     src/transition-dialogs.cpp
     src/transitions-dock.hpp
     src/transitions-dock.cpp
+    src/tm-style.hpp
+    src/tm-style.cpp
+    src/transition-list.hpp
+    src/transition-list.cpp
+    src/timeline-slider.hpp
+    src/media-probe.hpp
+    src/media-probe.cpp
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

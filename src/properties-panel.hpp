@@ -25,6 +25,9 @@ public:
 	// edit made elsewhere).
 	void refresh();
 
+	// Clears the source's settings back to its defaults.
+	void resetToDefaults();
+
 signals:
 	void settingsChanged();
 
@@ -34,11 +37,12 @@ private:
 	void clearWidgets();
 	void addProperty(obs_property_t *prop, QFormLayout *layout);
 	void commit(obs_property_t *prop);
-	void resetToDefaults();
+	static QFormLayout *makeForm();
 
 	QWidget *makeFontField(obs_property_t *prop, const QByteArray &key, const QString &label);
 	QWidget *makeEditableListField(obs_property_t *prop, const QByteArray &key, const QString &label);
 	QWidget *makeFrameRateField(obs_property_t *prop, const QByteArray &key);
+	QWidget *makeLumaPicker(obs_property_t *prop, const QByteArray &key);
 	void commitEditableList(obs_property_t *prop, const QByteArray &key, QListWidget *list);
 
 	using PropertiesPtr = std::unique_ptr<obs_properties_t, decltype(&obs_properties_destroy)>;
