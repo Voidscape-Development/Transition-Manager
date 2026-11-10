@@ -718,6 +718,7 @@ void TransitionManagerWindow::refreshList()
 	OBSSource current = store.current();
 	const auto all = store.transitions();
 	const bool editable = store.canEditList();
+	const bool reorderable = store.canReorder();
 
 	std::vector<OBSSource> builtIn, custom;
 	for (const OBSSource &s : all)
@@ -742,7 +743,7 @@ void TransitionManagerWindow::refreshList()
 		item->setToolTip(tip);
 
 		Qt::ItemFlags flags = Qt::ItemIsEnabled | Qt::ItemIsSelectable;
-		if (kind == Custom && editable)
+		if (kind == Custom && reorderable)
 			flags |= Qt::ItemIsDragEnabled;
 		item->setFlags(flags);
 		if (s.Get() == keep)
@@ -769,10 +770,14 @@ void TransitionManagerWindow::refreshList()
 
 	countLabel_->setText(QString::number(all.size()));
 	newBtn_->setEnabled(editable);
-	sidebarNote_->setText(
-		editable ? tr("Drag to reorder. The order matches the Scene Transitions dropdown in OBS.")
-			 : tr("OBS's transition list couldn't be accessed, so adding, removing, renaming "
-			      "and reordering are turned off. Settings, preview and switching still work."));
+	if (reorderable)
+		sidebarNote_->setText(tr("Drag to reorder. The order matches the Scene Transitions dropdown in OBS."));
+	else if (editable)
+		sidebarNote_->setText(tr("The order matches the Scene Transitions dropdown in OBS. This version of "
+					 "OBS doesn't keep a custom order, so reordering is turned off."));
+	else
+		sidebarNote_->setText(tr("OBS's transition list couldn't be accessed, so adding, removing, renaming "
+					 "and reordering are turned off. Settings, preview and switching still work."));
 	applyFilter();
 
 	// A rename changes the header.
@@ -814,7 +819,7 @@ void TransitionManagerWindow::applyFilter()
 	closeSection();
 
 	// Reordering a filtered list would be ambiguous.
-	const bool canDrag = text.isEmpty() && TransitionStore::instance().canEditList();
+	const bool canDrag = text.isEmpty() && TransitionStore::instance().canReorder();
 	list_->setDragEnabled(canDrag);
 	list_->setDragDropMode(canDrag ? QAbstractItemView::InternalMove : QAbstractItemView::NoDragDrop);
 }
@@ -1220,15 +1225,18 @@ void TransitionManagerWindow::onCreate(const QString &typeId)
 	auto &store = TransitionStore::instance();
 	const QByteArray id = typeId.toUtf8();
 	const char *display = obs_source_get_display_name(id.constData());
-	const QString suggested = store.uniqueName(QString::fromUtf8(display ? display : id.constData()));
-	const QString name = TransitionDialogs::askName(this, tr("New transition"), suggested);
-	if (name.isEmpty())
-		return;
+	QString name;
+	if (!store.obsPrompts()) { // otherwise OBS asks for the name itself
+		const QString suggested = store.uniqueName(QString::fromUtf8(display ? display : id.constData()));
+		name = TransitionDialogs::askName(this, tr("New transition"), suggested);
+		if (name.isEmpty())
+			return;
+	}
 
 	obs_source_t *source = store.createTransition(id.constData(), name);
 	if (source)
 		selectSource(source);
-	else
+	else if (!store.obsPrompts()) // with OBS's dialog, nullptr usually means cancelled
 		QMessageBox::warning(this, tr("New transition"), tr("The transition couldn't be created."));
 }
 
@@ -1238,11 +1246,14 @@ void TransitionManagerWindow::onDuplicate()
 	if (!source)
 		return;
 	auto &store = TransitionStore::instance();
-	const QString name = TransitionDialogs::askName(
-		this, tr("Duplicate transition"),
-		store.uniqueName(QString::fromUtf8(obs_source_get_name(source)) + tr(" (copy)")));
-	if (name.isEmpty())
-		return;
+	QString name;
+	if (!store.obsPrompts()) { // otherwise OBS asks for the name itself
+		name = TransitionDialogs::askName(
+			this, tr("Duplicate transition"),
+			store.uniqueName(QString::fromUtf8(obs_source_get_name(source)) + tr(" (copy)")));
+		if (name.isEmpty())
+			return;
+	}
 	if (obs_source_t *copy = store.duplicateTransition(source, name))
 		selectSource(copy);
 }

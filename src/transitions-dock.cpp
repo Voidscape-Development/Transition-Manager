@@ -199,14 +199,18 @@ void TransitionsDock::addTransition(const QString &typeId)
 
 	// Like OBS: ask for a name, make the new transition active, then open
 	// its settings (here, in the Transition Manager window).
-	const QString suggested = store.uniqueName(QString::fromUtf8(display ? display : id.constData()));
-	const QString name = TransitionDialogs::askName(this, tr("Add transition"), suggested);
-	if (name.isEmpty())
-		return;
+	QString name;
+	if (!store.obsPrompts()) { // otherwise OBS asks for the name itself
+		const QString suggested = store.uniqueName(QString::fromUtf8(display ? display : id.constData()));
+		name = TransitionDialogs::askName(this, tr("Add transition"), suggested);
+		if (name.isEmpty())
+			return;
+	}
 
 	obs_source_t *source = store.createTransition(id.constData(), name);
 	if (!source) {
-		QMessageBox::warning(this, tr("Add transition"), tr("The transition couldn't be created."));
+		if (!store.obsPrompts()) // with OBS's dialog, nullptr usually means cancelled
+			QMessageBox::warning(this, tr("Add transition"), tr("The transition couldn't be created."));
 		return;
 	}
 	store.setCurrent(source);
@@ -233,12 +237,16 @@ void TransitionsDock::showPropsMenu()
 		    TransitionDialogs::rename(this, keep);
 	    })->setEnabled(editable);
 	menu.addAction(tr("Duplicate"), this, [this, keep] {
+		    auto &store = TransitionStore::instance();
+		    if (store.obsPrompts()) { // OBS asks for the name itself
+			    store.duplicateTransition(keep, QString());
+			    return;
+		    }
 		    const QString name = TransitionDialogs::askName(
 			    this, tr("Duplicate transition"),
-			    TransitionStore::instance().uniqueName(QString::fromUtf8(obs_source_get_name(keep)) +
-								   tr(" (copy)")));
+			    store.uniqueName(QString::fromUtf8(obs_source_get_name(keep)) + tr(" (copy)")));
 		    if (!name.isEmpty())
-			    TransitionStore::instance().duplicateTransition(keep, name);
+			    store.duplicateTransition(keep, name);
 	    })->setEnabled(editable);
 	menu.addAction(tr("Properties"), this, [this, keep] {
 		    window_->open(keep);

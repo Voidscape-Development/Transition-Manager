@@ -4,10 +4,15 @@
 #include <plugin-support.h>
 
 #include <QComboBox>
+#include <QDialog>
 #include <QMainWindow>
+#include <QMetaObject>
+#include <QPointer>
 #include <QSignalBlocker>
 #include <algorithm>
+#include <climits>
 #include <cstring>
+#include <utility>
 
 static const char *kSaveKey = "transition_manager";
 
@@ -58,22 +63,112 @@ QComboBox *TransitionStore::combo() const
 	return combo_;
 }
 
+QObject *TransitionStore::mainWindow() const
+{
+	return static_cast<QObject *>(obs_frontend_get_main_window());
+}
+
+bool TransitionStore::hasMainSlot(const char *signature) const
+{
+	QObject *main = mainWindow();
+	if (!main)
+		return false;
+	const QByteArray normalized = QMetaObject::normalizedSignature(signature);
+	return main->metaObject()->indexOfMethod(normalized.constData()) >= 0;
+}
+
+static bool holdsSource(const QVariant &v)
+{
+	return v.metaType().id() == qMetaTypeId<OBSSource>();
+}
+
+static bool holdsUuid(const QVariant &v)
+{
+	return v.metaType().id() == QMetaType::QString;
+}
+
+static QString uuidOf(obs_source_t *source)
+{
+	return QString::fromUtf8(obs_source_get_uuid(source));
+}
+
+TransitionStore::ListMode TransitionStore::listMode() const
+{
+	QComboBox *box = combo();
+	if (!box || box->count() == 0)
+		return ListMode::Unavailable;
+
+	// OBS 31 and older store the transition itself in each item; OBS 32
+	// switched to storing its UUID and keeping the real list elsewhere.
+	const QVariant first = box->itemData(0);
+	if (holdsSource(first))
+		return ListMode::Legacy;
+	if (holdsUuid(first))
+		return ListMode::Uuid;
+
+	if (!warnedUnsupported_) {
+		obs_log(LOG_WARNING,
+			"OBS's transition list holds data of an unknown type (%s); adding, removing, "
+			"renaming and reordering transitions is disabled",
+			first.typeName() ? first.typeName() : "none");
+		warnedUnsupported_ = true;
+	}
+	return ListMode::Unavailable;
+}
+
 bool TransitionStore::canEditList() const
 {
 	QComboBox *box = combo();
 	if (!box)
 		return false;
 
-	// Make sure the widget really is the list the frontend API reports, in
-	// the same order, before writing to it.
+	const ListMode mode = listMode();
 	const auto list = transitions();
 	if ((size_t)box->count() != list.size())
 		return false;
-	for (int i = 0; i < box->count(); ++i) {
-		if (box->itemData(i).value<OBSSource>().Get() != list[(size_t)i].Get())
-			return false;
+
+	if (mode == ListMode::Legacy) {
+		// Make sure the widget really is the list the frontend API reports,
+		// in the same order, before writing to it.
+		for (int i = 0; i < box->count(); ++i) {
+			if (box->itemData(i).value<OBSSource>().Get() != list[(size_t)i].Get())
+				return false;
+		}
+		return true;
 	}
-	return true;
+
+	if (mode == ListMode::Uuid) {
+		// Edits go through these main-window slots; a future OBS may rename them.
+		if (!hasMainSlot("AddTransition(const char*)") || !hasMainSlot("RenameTransition(OBSSource)") ||
+		    !hasMainSlot("on_transitionRemove_clicked()")) {
+			if (!warnedUnsupported_) {
+				obs_log(LOG_WARNING, "OBS's transition slots weren't found; adding, removing and "
+						     "renaming transitions is disabled");
+				warnedUnsupported_ = true;
+			}
+			return false;
+		}
+		// The dropdown must show exactly the transitions OBS reports.
+		for (const OBSSource &s : list) {
+			if (box->findData(uuidOf(s)) < 0)
+				return false;
+		}
+		return true;
+	}
+
+	return false;
+}
+
+bool TransitionStore::canReorder() const
+{
+	// OBS 32+ saves transitions from an unordered map, so an order set here
+	// wouldn't survive a restart.
+	return listMode() == ListMode::Legacy && canEditList();
+}
+
+bool TransitionStore::obsPrompts() const
+{
+	return listMode() == ListMode::Uuid;
 }
 
 int TransitionStore::comboIndexOf(obs_source_t *source) const
@@ -81,6 +176,8 @@ int TransitionStore::comboIndexOf(obs_source_t *source) const
 	QComboBox *box = combo();
 	if (!box || !source)
 		return -1;
+	if (listMode() == ListMode::Uuid)
+		return box->findData(uuidOf(source));
 	for (int i = 0; i < box->count(); ++i) {
 		if (box->itemData(i).value<OBSSource>().Get() == source)
 			return i;
@@ -97,6 +194,23 @@ std::vector<OBSSource> TransitionStore::transitions() const
 	for (size_t i = 0; i < list.sources.num; ++i)
 		out.emplace_back(list.sources.array[i]);
 	obs_frontend_source_list_free(&list);
+
+	// OBS 32+ reports transitions in hash-map order. Use the order of OBS's
+	// dropdown instead, so both lists match.
+	if (listMode() == ListMode::Uuid) {
+		QComboBox *box = combo();
+		std::vector<std::pair<int, OBSSource>> ranked;
+		ranked.reserve(out.size());
+		for (OBSSource &s : out) {
+			const int idx = box->findData(uuidOf(s));
+			ranked.emplace_back(idx < 0 ? INT_MAX : idx, std::move(s));
+		}
+		std::stable_sort(ranked.begin(), ranked.end(),
+				 [](const auto &a, const auto &b) { return a.first < b.first; });
+		out.clear();
+		for (auto &entry : ranked)
+			out.push_back(std::move(entry.second));
+	}
 	return out;
 }
 
@@ -156,6 +270,8 @@ obs_source_t *TransitionStore::createTransition(const char *typeId, const QStrin
 {
 	if (!canEditList())
 		return nullptr;
+	if (listMode() == ListMode::Uuid)
+		return createViaObs(typeId, settings);
 
 	const QString finalName = uniqueName(name.trimmed().isEmpty() ? QStringLiteral("Transition") : name.trimmed());
 	const QByteArray utf8 = finalName.toUtf8();
@@ -198,8 +314,13 @@ obs_source_t *TransitionStore::duplicateTransition(obs_source_t *source, const Q
 
 bool TransitionStore::renameTransition(obs_source_t *source, const QString &name)
 {
+	if (!source || !canEditList())
+		return false;
+	if (listMode() == ListMode::Uuid)
+		return renameViaObs(source);
+
 	const QString trimmed = name.trimmed();
-	if (!source || trimmed.isEmpty() || nameTaken(trimmed, source) || !canEditList())
+	if (trimmed.isEmpty() || nameTaken(trimmed, source))
 		return false;
 
 	const int idx = comboIndexOf(source);
@@ -224,19 +345,12 @@ bool TransitionStore::removeTransition(obs_source_t *source, bool allowActive)
 {
 	if (!canRemove(source, allowActive))
 		return false;
+	if (listMode() == ListMode::Uuid)
+		return removeViaObs(source, allowActive);
 
 	if (current().Get() == source) {
 		// Switch away first so the output never loses its transition.
-		OBSSource fallback;
-		for (const OBSSource &s : transitions()) {
-			if (s.Get() == source)
-				continue;
-			if (!fallback || strcmp(obs_source_get_id(s), "fade_transition") == 0)
-				fallback = s;
-			if (strcmp(obs_source_get_id(s), "fade_transition") == 0)
-				break;
-		}
-		setCurrent(fallback);
+		setCurrent(fallbackFor(source));
 		if (current().Get() == source)
 			return false;
 	}
@@ -274,7 +388,7 @@ bool TransitionStore::removeTransition(obs_source_t *source, bool allowActive)
 
 bool TransitionStore::moveTransition(int from, int to)
 {
-	if (!canEditList())
+	if (!canReorder())
 		return false;
 
 	QComboBox *box = combo();
@@ -307,6 +421,161 @@ void TransitionStore::setCurrent(obs_source_t *source)
 	// Safe because every transition shown here is in OBS's own list.
 	if (source && contains(source))
 		obs_frontend_set_current_transition(source);
+}
+
+OBSSource TransitionStore::fallbackFor(obs_source_t *source) const
+{
+	// Fade if there is one, otherwise the first other transition.
+	OBSSource fallback;
+	for (const OBSSource &s : transitions()) {
+		if (s.Get() == source)
+			continue;
+		if (strcmp(obs_source_get_id(s), "fade_transition") == 0)
+			return s;
+		if (!fallback)
+			fallback = s;
+	}
+	return fallback;
+}
+
+void TransitionStore::restoreCurrent(obs_source_t *previous, int previousDuration)
+{
+	if (previous && current().Get() != previous)
+		setCurrent(previous);
+	// Activating a transition with its own default duration changes OBS's
+	// duration box; put back what the user had.
+	if (previousDuration > 0 && obs_frontend_get_transition_duration() != previousDuration)
+		obs_frontend_set_transition_duration(previousDuration);
+}
+
+// ---- edits through OBS's own slots (OBS 32+) -------------------------------------
+
+// OBS's properties windows that are open right now.
+static std::vector<QPointer<QDialog>> propertiesWindows(QObject *main)
+{
+	std::vector<QPointer<QDialog>> out;
+	for (QDialog *dialog : main->findChildren<QDialog *>()) {
+		if (dialog->inherits("OBSBasicProperties"))
+			out.emplace_back(dialog);
+	}
+	return out;
+}
+
+obs_source_t *TransitionStore::createViaObs(const char *typeId, obs_data_t *settings)
+{
+	QObject *main = mainWindow();
+	if (!main || !typeId)
+		return nullptr;
+
+	const OBSSource previous = current();
+	const int previousDuration = obs_frontend_get_transition_duration();
+	const auto before = transitions();
+	const auto windowsBefore = propertiesWindows(main);
+
+	// The same as picking a type from OBS's "+" menu: OBS asks for a name,
+	// adds the transition to its list, makes it active and opens its
+	// properties window. A cancelled name dialog adds nothing.
+	if (!QMetaObject::invokeMethod(main, "AddTransition", Qt::DirectConnection, Q_ARG(const char *, typeId))) {
+		obs_log(LOG_WARNING, "couldn't ask OBS to add a transition of type '%s'", typeId);
+		return nullptr;
+	}
+
+	OBSSource created;
+	for (const OBSSource &s : transitions()) {
+		const bool existed = std::any_of(before.begin(), before.end(),
+						 [&s](const OBSSource &b) { return b.Get() == s.Get(); });
+		if (!existed) {
+			created = s;
+			break;
+		}
+	}
+	if (!created)
+		return nullptr;
+
+	// The plugin shows the new transition's settings itself. The window was
+	// just opened and nothing in it changed, so closing it discards nothing.
+	for (QDialog *dialog : propertiesWindows(main)) {
+		const bool existed = std::any_of(windowsBefore.begin(), windowsBefore.end(),
+						 [dialog](const QPointer<QDialog> &w) { return w == dialog; });
+		if (!existed)
+			dialog->close();
+	}
+
+	if (settings)
+		obs_source_update(created, settings);
+
+	restoreCurrent(previous, previousDuration);
+	emit changed();
+	return created.Get(); // OBS's list keeps the reference
+}
+
+bool TransitionStore::renameViaObs(obs_source_t *source)
+{
+	QObject *main = mainWindow();
+	if (!main)
+		return false;
+
+	OBSSource keep(source);
+	const QString oldName = QString::fromUtf8(obs_source_get_name(source));
+
+	// OBS asks for the new name, checks it's unique and updates its lookups.
+	if (!QMetaObject::invokeMethod(main, "RenameTransition", Qt::DirectConnection, Q_ARG(OBSSource, keep))) {
+		obs_log(LOG_WARNING, "couldn't ask OBS to rename transition '%s'", obs_source_get_name(source));
+		return false;
+	}
+
+	const QString newName = QString::fromUtf8(obs_source_get_name(source));
+	if (newName == oldName)
+		return false; // cancelled
+
+	if (durations_.contains(oldName))
+		durations_.insert(newName, durations_.take(oldName));
+
+	emit changed();
+	return true;
+}
+
+bool TransitionStore::removeViaObs(obs_source_t *source, bool allowActive)
+{
+	QObject *main = mainWindow();
+	if (!main)
+		return false;
+
+	OBSSource keep(source); // OBS releases its reference when it removes it
+	const QString name = QString::fromUtf8(obs_source_get_name(source));
+	const OBSSource previous = current();
+	const int previousDuration = obs_frontend_get_transition_duration();
+	const bool wasActive = previous.Get() == source;
+	if (wasActive && !allowActive)
+		return false;
+
+	// OBS's remove button removes the active transition, so select this one
+	// first. That fails while a transition is running.
+	if (!wasActive) {
+		setCurrent(source);
+		if (current().Get() != source) {
+			restoreCurrent(previous, previousDuration);
+			return false;
+		}
+	}
+
+	// OBS confirms, removes it (with any quick transitions using it) and
+	// switches to another transition.
+	if (!QMetaObject::invokeMethod(main, "on_transitionRemove_clicked", Qt::DirectConnection))
+		obs_log(LOG_WARNING, "couldn't ask OBS to remove transition '%s'", obs_source_get_name(source));
+
+	const bool removed = !contains(source);
+	if (removed)
+		durations_.remove(name);
+
+	if (!wasActive)
+		restoreCurrent(previous, previousDuration);
+	else if (removed)
+		setCurrent(fallbackFor(source)); // prefer Fade, like the legacy path
+
+	if (removed)
+		emit changed();
+	return removed;
 }
 
 // ---- default durations ---------------------------------------------------------

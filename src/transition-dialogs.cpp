@@ -38,9 +38,12 @@ bool rename(QWidget *parent, obs_source_t *source)
 {
 	if (!source)
 		return false;
+	auto &store = TransitionStore::instance();
+	if (store.obsPrompts())
+		return store.renameTransition(source, QString()); // OBS asks for the name
 	const QString name =
 		askName(parent, tr("Rename transition"), QString::fromUtf8(obs_source_get_name(source)), source);
-	return !name.isEmpty() && TransitionStore::instance().renameTransition(source, name);
+	return !name.isEmpty() && store.renameTransition(source, name);
 }
 
 bool remove(QWidget *parent, obs_source_t *source, bool allowActive)
@@ -48,6 +51,8 @@ bool remove(QWidget *parent, obs_source_t *source, bool allowActive)
 	auto &store = TransitionStore::instance();
 	if (!source || !store.canRemove(source, allowActive))
 		return false;
+	if (store.obsPrompts())
+		return store.removeTransition(source, allowActive); // OBS confirms
 
 	const auto answer = QMessageBox::question(
 		parent, tr("Remove transition"),
