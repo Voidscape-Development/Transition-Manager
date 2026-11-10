@@ -1,59 +1,102 @@
-# OBS Plugin Template
+# Transition Manager for OBS Studio
 
-## Introduction
+A dock for creating, editing, previewing, duplicating, renaming, reordering and
+removing OBS Studio scene transitions, without opening OBS's transition
+properties window.
 
-The plugin template is meant to be used as a starting point for OBS Studio plugin development. It includes:
+Targets OBS 30+ (uses `obs_frontend_add_dock_by_id`) and Qt 6. Built on the
+[obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate).
 
-* Boilerplate plugin source code
-* A CMake project file
-* GitHub Actions workflows and repository actions
+## Features
 
-## Supported Build Environments
+- **One list, shared with OBS.** The dock shows exactly the transitions in OBS's
+  Scene Transitions dropdown, in the same order. Transitions created here go
+  into that dropdown the same way OBS's **+** button adds them. OBS saves them
+  with the scene collection, and they work everywhere OBS uses transitions:
+  scene switches, studio mode, quick transitions and per-scene overrides.
+- **Live preview.** Each selected transition gets a private copy that you can
+  play or scrub with the slider. The preview never touches the transition
+  driving your program output. It can run between two test colors, or from your
+  program scene to your preview scene (outside studio mode: the next scene in
+  the list).
+- **Settings editor.** The dock builds a form from the transition's own
+  properties. Every OBS property type is supported, including fonts, editable
+  lists, frame rates and sliders. Fields that appear or hide based on other
+  settings (Stinger, Luma Wipe, …) update as you edit. Changes apply to the real
+  transition immediately and are mirrored into the preview.
+- **New / Duplicate / Rename / Remove / Set active.** Available from the buttons
+  or the right-click menu, and double-clicking a transition sets it active.
+  Duplicating deep-copies its settings.
+- **Search and reorder.** Filter by name or type, and drag to reorder. OBS's
+  dropdown follows the new order.
+- **Per-transition durations.** Tick **Own duration** to remember a duration
+  for the selected transition. Whenever that transition becomes active, OBS's
+  duration box is set to it. Saved per scene collection.
 
-| Platform  | Tool   |
-|-----------|--------|
-| Windows   | Visual Studio 17 2022 |
-| macOS     | XCode 16.0 |
-| Windows, macOS  | CMake 3.30.5 |
-| Ubuntu 24.04 | CMake 3.28.3 |
-| Ubuntu 24.04 | `ninja-build` |
-| Ubuntu 24.04 | `pkg-config`
-| Ubuntu 24.04 | `build-essential` |
+### Rules
 
-## Quick Start
+- Removing follows OBS's own rules: built-in transitions without settings (Cut,
+  Fade) can't be removed. The active transition can't be removed either, so
+  switch away from it first.
+- Names must be unique, as in OBS.
 
-An absolute bare-bones [Quick Start Guide](https://github.com/obsproject/obs-plugintemplate/wiki/Quick-Start-Guide) is available in the wiki.
+## Layout
 
-## Documentation
+| File | Role |
+|---|---|
+| `src/plugin-main.cpp` | Module entry. Registers the dock and starts the store |
+| `src/transition-store.*` | Reads and edits OBS's transition list, hooks transitions it creates into OBS's scene-switch signals, and saves per-transition durations under the `transition_manager` key of the scene collection |
+| `src/obs-qt-types.hpp` | Declares the `OBSSource` Qt metatype under the same name OBS uses, so entries added here are readable by OBS |
+| `src/transition-preview.*` | Native `obs_display` that renders a private copy of the selected transition between test colors or real scenes |
+| `src/properties-panel.*` | Builds Qt widgets from `obs_properties_t` and writes changes back |
+| `src/transition-manager-dock.*` | The dock: preview, list, actions and settings |
 
-All documentation can be found in the [Plugin Template Wiki](https://github.com/obsproject/obs-plugintemplate/wiki).
+## Building
 
-Suggested reading to get up and running:
+Use the template's presets, which enable the frontend API and Qt:
 
-* [Getting started](https://github.com/obsproject/obs-plugintemplate/wiki/Getting-Started)
-* [Build system requirements](https://github.com/obsproject/obs-plugintemplate/wiki/Build-System-Requirements)
-* [Build system options](https://github.com/obsproject/obs-plugintemplate/wiki/CMake-Build-System-Options)
+```
+cmake --preset ubuntu-x86_64      # or macos / windows-x64
+cmake --build --preset ubuntu-x86_64
+```
 
-## GitHub Actions & CI
+On Ubuntu 24.04 you can also build against the distro packages
+(`libobs-dev`, `qt6-base-dev`, `qt6-base-private-dev`):
 
-Default GitHub Actions workflows are available for the following repository actions:
+```
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
+```
 
-* `push`: Run for commits or tags pushed to `master` or `main` branches.
-* `pr-pull`: Run when a Pull Request has been pushed or synchronized.
-* `dispatch`: Run when triggered by the workflow dispatch in GitHub's user interface.
-* `build-project`: Builds the actual project and is triggered by other workflows.
-* `check-format`: Checks CMake and plugin source code formatting and is triggered by other workflows.
+Then copy the module into your OBS plugins folder, e.g. on Linux
+`~/.config/obs-studio/plugins/obs-transition-manager/bin/64bit/obs-transition-manager.so`.
 
-The workflows make use of GitHub repository actions (contained in `.github/actions`) and build scripts (contained in `.github/scripts`) which are not needed for local development, but might need to be adjusted if additional/different steps are required to build the plugin.
+The supported build environments, GitHub Actions workflows, release tagging and
+macOS signing work exactly as in the plugin template. See the
+[Plugin Template Wiki](https://github.com/obsproject/obs-plugintemplate/wiki).
 
-### Retrieving build artifacts
+## Known limitations
 
-Successful builds on GitHub Actions will produce build artifacts that can be downloaded for testing. These artifacts are commonly simple archives and will not contain package installers or installation programs.
-
-### Building a Release
-
-To create a release, an appropriately named tag needs to be pushed to the `main`/`master` branch using semantic versioning (e.g., `12.3.4`, `23.4.5-beta2`). A draft release will be created on the associated repository with generated installer packages or installation programs attached as release artifacts.
-
-## Signing and Notarizing on macOS
-
-Basic concepts of codesigning and notarization on macOS are explained in the correspodning [Wiki article](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS) which has a specific section for the [GitHub Actions setup](https://github.com/obsproject/obs-plugintemplate/wiki/Codesigning-On-macOS#setting-up-code-signing-for-github-actions).
+- **Relies on OBS's widget layout.** No public API adds a transition to OBS's
+  list, so the store finds the main window's `transitions` combo box and checks
+  it matches what `obs_frontend_get_transitions` reports before writing to it.
+  If a future OBS version changes this, the dock shows a note and turns off
+  New/Duplicate/Rename/Remove/reorder. Settings, preview and switching keep
+  working.
+- **No list-changed event for others.** OBS doesn't let plugins raise
+  `OBS_FRONTEND_EVENT_TRANSITION_LIST_CHANGED`, so other plugins (and
+  obs-websocket clients) aren't told when this dock adds, renames, removes or
+  reorders a transition. OBS's own menus read the list when they open, so they
+  are unaffected.
+- **Quick transitions.** Removing a transition used by a quick-transition button
+  leaves that button working with the removed transition until OBS restarts.
+- **Durations are stored by name,** the same way OBS stores per-scene transition
+  overrides. Renaming in this dock carries the duration over. Renaming in OBS's
+  own dialog doesn't.
+- **Wayland.** The preview surface is wired for Windows, macOS and Linux/X11.
+  On Wayland the preview stays blank (everything else works).
+- **Scene preview.** The preview copy is marked active, as in OBS's own
+  transition properties preview, so media-based transitions such as Stinger
+  actually play. In "Program → Preview scene" mode the target scene therefore
+  counts as active while it's in the preview. Media sources in it that are set
+  to restart when activated can restart.
