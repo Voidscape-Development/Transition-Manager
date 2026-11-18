@@ -4,7 +4,7 @@ A **Transition Manager** dock that works like OBS's own Scene Transitions dock,
 plus a full **Transition Manager window** for creating, editing, previewing,
 duplicating, renaming, reordering and removing scene transitions.
 
-Targets OBS 30+ (uses `obs_frontend_add_dock_by_id`) and Qt 6. Built on the
+Targets OBS Studio 33+ and Qt 6. Built on the
 [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate).
 
 ## The dock
@@ -96,16 +96,16 @@ cmake --preset ubuntu-x86_64      # or macos / windows-x64
 cmake --build --preset ubuntu-x86_64
 ```
 
-On Ubuntu 24.04 you can also build against the distro packages
-(`libobs-dev`, `qt6-base-dev`, `qt6-base-private-dev`):
+On Ubuntu 26.04 you can also build against OBS Studio 33 from the OBS PPA
+(`obs-studio`, `qt6-base-dev`, `qt6-base-private-dev`):
 
 ```
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
 ```
 
-Then copy the module into your OBS plugins folder, e.g. on Linux
-`~/.config/obs-studio/plugins/obs-transition-manager/bin/64bit/obs-transition-manager.so`.
+Then install it with `cmake --install build --prefix /usr`, which places the module in
+`/usr/lib/<arch>/obs-modules/plugins/` and its data in `/usr/share/obs/obs-modules/plugins/obs-transition-manager/`.
 
 The supported build environments, GitHub Actions workflows, release tagging and
 macOS signing work exactly as in the plugin template. See the
