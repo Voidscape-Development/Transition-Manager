@@ -8,6 +8,7 @@ project(${_name} VERSION ${_version})
 # required rather than optional.
 option(ENABLE_FRONTEND_API "Use obs-frontend-api for UI functionality" ON)
 option(ENABLE_QT "Use Qt functionality" ON)
+option(ENABLE_BUILD_LEGACY "Enable legacy build" ON)
 
 if(NOT ENABLE_FRONTEND_API OR NOT ENABLE_QT)
   message(FATAL_ERROR "Transition Manager requires ENABLE_FRONTEND_API=ON and ENABLE_QT=ON")

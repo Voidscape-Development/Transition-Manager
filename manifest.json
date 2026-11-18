@@ -1,0 +1,18 @@
+{
+    "display_name": "Transition Manager",
+    "id": "bcfadd27-cc49-49dd-8252-d997bde1e373",
+    "version": "0.1.0",
+    "authors": [
+        "Voidscape Development"
+    ],
+    "name": "obs-transition-manager",
+    "description": "A Transition Manager dock that works like OBS's own Scene Transitions dock, plus a full Transition Manager window for creating, editing, previewing, duplicating, renaming, reordering and removing scene transitions.",
+    "long_description": "A Transition Manager dock that works like OBS's own Scene Transitions dock, plus a full Transition Manager window for creating, editing, previewing, duplicating, renaming, reordering and removing scene transitions.",
+    "urls": {
+        "repository": "https://github.com/Voidscape-Development/Transition-Manager",
+        "website": "https://github.com/Voidscape-Development/Transition-Manager",
+        "support": "https://github.com/Voidscape-Development/Transition-Manager/issues"
+    },
+    "has_banner": false,
+    "has_icon": false
+}
