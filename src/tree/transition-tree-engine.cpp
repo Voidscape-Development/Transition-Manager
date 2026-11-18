@@ -870,8 +870,8 @@ static void OnFrontendEvent(enum obs_frontend_event event, void *)
 
 	case OBS_FRONTEND_EVENT_SCENE_COLLECTION_CLEANUP:
 	case OBS_FRONTEND_EVENT_EXIT:
-		if (event == OBS_FRONTEND_EVENT_EXIT)
-			ReleaseTransitionHooks();
+		/* The collection's transitions are about to go. */
+		ReleaseTransitionHooks();
 		g_armed.clear();
 		g_armedGeneration.clear();
 		g_lastProgram.clear();

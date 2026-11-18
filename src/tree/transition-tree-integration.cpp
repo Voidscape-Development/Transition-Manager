@@ -32,6 +32,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QMetaObject>
 
 #include <algorithm>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -46,6 +47,10 @@ Integration g_integration;
  * is removed simply expires here. */
 std::vector<obs_weak_source_t *> g_hookedTransitions;
 
+/* Names in OBS's transition list, and whether it has been read yet. */
+std::set<std::string> g_knownTransitions;
+bool g_knownTransitionsRead = false;
+
 void OnTransitionRename(void *, calldata_t *callData)
 {
 	const char *rawPrevious = calldata_string(callData, "prev_name");
@@ -59,6 +64,7 @@ void OnTransitionRename(void *, calldata_t *callData)
 		return;
 
 	auto task = [previous, next]() {
+		RefreshTransitionHooks(); /* the known names changed too */
 		if (!RenameTransitionReferences(previous, next))
 			return;
 		obs_log(LOG_INFO, "rules now use renamed transition '%s' (was '%s')", next.c_str(), previous.c_str());
@@ -238,12 +244,48 @@ void RefreshTransitionHooks()
 		signal_handler_connect(obs_source_get_signal_handler(source), "rename", OnTransitionRename, nullptr);
 		g_hookedTransitions.push_back(obs_source_get_weak_source(source));
 	}
+
+	std::set<std::string> names;
+	for (size_t i = 0; i < transitions.sources.num; i++) {
+		const char *name = obs_source_get_name(transitions.sources.array[i]);
+		if (name)
+			names.insert(name);
+	}
 	obs_frontend_source_list_free(&transitions);
+
+	/* Which candidates are usable depends on this, so re-resolve when it
+	 * changes. An empty list means OBS is between collections. */
+	if (names.empty() || (g_knownTransitionsRead && names == g_knownTransitions))
+		return;
+	g_knownTransitions = std::move(names);
+	g_knownTransitionsRead = true;
+	GetStore().Touch();
+	ApplyOverrides();
+	TransitionTreeDialog::NotifyDataChanged();
 }
 
 void ReleaseTransitionHooks()
 {
 	UnhookTransitions();
+	g_knownTransitions.clear();
+	g_knownTransitionsRead = false;
+}
+
+bool TransitionExists(const std::string &name)
+{
+	return !g_knownTransitionsRead || g_knownTransitions.count(name) > 0;
+}
+
+std::vector<std::string> MissingTransitions(const Mark &mark)
+{
+	std::vector<std::string> missing;
+	for (const auto &candidate : mark.candidates) {
+		if (!candidate.enabled || candidate.transition.empty() || TransitionExists(candidate.transition))
+			continue;
+		if (std::find(missing.begin(), missing.end(), candidate.transition) == missing.end())
+			missing.push_back(candidate.transition);
+	}
+	return missing;
 }
 
 /* ------------------------------------------------------------------------ */

@@ -109,7 +109,9 @@ struct Mark {
 		return enabled && from.Matches(fromScene) && to.Matches(toScene);
 	}
 
-	/* Indices of candidates that are enabled and name a transition. */
+	/* Indices of candidates that are enabled and name a transition that
+	 * exists. A missing transition is skipped like a missing scene, so the
+	 * mark falls back to its other candidates, or the next matching mark. */
 	std::vector<size_t> UsableCandidates() const;
 
 	/* Chooses the candidate that should fire next without recording it.
@@ -285,8 +287,17 @@ bool RenameTransitionReferences(const std::string &prev, const std::string &next
  * load and whenever the list may have changed; safe to call repeatedly. */
 void RefreshTransitionHooks();
 
-/* Disconnects every hook RefreshTransitionHooks() made. */
+/* Disconnects every hook RefreshTransitionHooks() made and forgets which
+ * transitions exist, until the next RefreshTransitionHooks(). */
 void ReleaseTransitionHooks();
+
+/* Whether OBS's list has a transition with this name, as of the last
+ * RefreshTransitionHooks(). Before the list has been read (while OBS loads or
+ * swaps scene collections) every name counts as existing. */
+bool TransitionExists(const std::string &name);
+
+/* Names a mark's turned-on candidates use that are not in OBS's list. */
+std::vector<std::string> MissingTransitions(const Mark &mark);
 
 /* Where a transition is used, across every preset (local and global). */
 struct TransitionUsage {
@@ -311,9 +322,21 @@ struct Integration {
 	std::string hostName;
 
 	/* Replaces the "New transition" button's default of clicking OBS's own
-	 * add button. Shows its own UI anchored at `parent`; returns the new
-	 * transition's name, or an empty string if cancelled. */
-	std::function<std::string(QWidget *parent)> createTransition;
+	 * add button, and creates replacements for missing transitions. Shows
+	 * its own UI anchored at `parent`, offering `suggestedName` where it asks
+	 * for a name; returns the new transition's name, or an empty string if
+	 * cancelled. */
+	std::function<std::string(QWidget *parent, const std::string &suggestedName)> createTransition;
+
+	/* The duration the host keeps for a transition, in ms, or <= 0 for none.
+	 * New candidates start with it. */
+	std::function<int(const std::string &transition)> defaultDuration;
+
+	/* Plays a transition between two scenes of a canvas without touching
+	 * program output. */
+	std::function<void(const std::string &transition, int durationMs, const std::string &canvas,
+			   const std::string &fromScene, const std::string &toScene)>
+		previewSwitch;
 
 	/* Opens an editor for the named transition. */
 	std::function<void(const std::string &transition)> editTransition;

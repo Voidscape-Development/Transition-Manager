@@ -45,7 +45,15 @@ public:
 	// creates the chosen one (asking for its name, or letting OBS ask) and
 	// opens this window on it so its settings can be edited. Returns the new
 	// transition (borrowed; OBS's list owns it) or nullptr if cancelled.
-	obs_source_t *createFromMenu(QWidget *parent, const QPoint &globalPos);
+	// `suggestedName` is offered as the name where the plugin asks for one.
+	obs_source_t *createFromMenu(QWidget *parent, const QPoint &globalPos,
+				     const QString &suggestedName = QString());
+
+	// For other components: opens this window on `transition` and plays it
+	// from `fromScene` to `toScene` for `durationMs` (ignored for
+	// fixed-length transitions), as a private preview. The scene pair stays
+	// available as a third "Preview between" option.
+	void previewSwitch(obs_source_t *transition, int durationMs, obs_source_t *fromScene, obs_source_t *toScene);
 
 protected:
 	void showEvent(QShowEvent *event) override;
@@ -74,7 +82,8 @@ private:
 	obs_source_t *selected() const;
 	void selectSource(obs_source_t *source);
 	void populateNewMenu(QMenu *menu);
-	obs_source_t *createOfType(const QString &typeId, QWidget *dialogParent);
+	obs_source_t *createOfType(const QString &typeId, QWidget *dialogParent,
+				   const QString &suggestedName = QString());
 	void showContextMenu(const QPoint &pos);
 	QMenu *buildActionsMenu(QWidget *parent);
 
@@ -126,6 +135,8 @@ private:
 	QPushButton *loopBtn_ = nullptr;
 	QPushButton *colorsBtn_ = nullptr;
 	QPushButton *scenesBtn_ = nullptr;
+	QPushButton *pinnedBtn_ = nullptr;
+	int previewDurationMs_ = -1; // set by previewSwitch()
 
 	QWidget *durationAdjustable_ = nullptr;
 	QWidget *durationFixed_ = nullptr;

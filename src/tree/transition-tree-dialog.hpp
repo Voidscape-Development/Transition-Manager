@@ -141,6 +141,7 @@ private:
 	void MoveMark(int delta);
 	void PreferMark(const std::string &markId);
 	void OnCheckerLink(const QString &link);
+	void PreviewCheckerSwitch(const std::string &markId);
 	void SelectMark(const std::string &markId);
 	void TestMark();
 	void AddCandidate();
@@ -149,6 +150,7 @@ private:
 	void ImportPresets();
 	void ExportPresets();
 	void CreateTransition();
+	void ReplaceMissingTransition(const std::string &missing);
 	void ShowTreeContextMenu(const QPoint &pos);
 	void ReadMatcherFromWidgets(tt::SceneMatcher &matcher, QButtonGroup *typeGroup, QListWidget *sceneList);
 

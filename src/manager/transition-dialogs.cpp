@@ -61,8 +61,8 @@ bool remove(QWidget *parent, obs_source_t *source, bool allowActive)
 		if (!usage.isEmpty()) {
 			const auto answer = QMessageBox::question(
 				parent, tr("Remove transition"),
-				tr("%1.\n\nRemove \"%2\" anyway? Transition Tree keeps referring to "
-				   "it by name; while it's missing, OBS uses its current transition instead.")
+				tr("%1.\n\nRemove \"%2\" anyway? Those rules skip it until a transition "
+				   "with that name exists again.")
 					.arg(usage, name));
 			if (answer != QMessageBox::Yes)
 				return false;
@@ -75,9 +75,7 @@ bool remove(QWidget *parent, obs_source_t *source, bool allowActive)
 			       .arg(name);
 	if (!usage.isEmpty())
 		text += QStringLiteral("\n\n") +
-			tr("%1. Transition Tree keeps referring to it by name; while it's missing, OBS uses its current "
-			   "transition instead.")
-				.arg(usage);
+			tr("%1. Those rules skip it until a transition with that name exists again.").arg(usage);
 
 	const auto answer = QMessageBox::question(parent, tr("Remove transition"), text);
 	return answer == QMessageBox::Yes && store.removeTransition(source, allowActive);

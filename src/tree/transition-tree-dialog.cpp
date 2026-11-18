@@ -46,6 +46,7 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <QListWidget>
 #include <QListWidgetItem>
 #include <QMainWindow>
+#include <QCursor>
 #include <QMenu>
 #include <QMessageBox>
 #include <QMetaObject>
@@ -180,6 +181,20 @@ std::vector<std::string> MissingScenes(const Mark &mark)
 }
 
 /* Every reason a mark cannot fire, in the words shown to the user. */
+/* The duration a candidate for this transition starts with: the one the host
+ * (Transition Manager) saved for it, else OBS's current duration. */
+int DefaultCandidateDuration(const std::string &transition)
+{
+	const Integration &integration = GetIntegration();
+	if (integration.defaultDuration && !transition.empty()) {
+		const int ms = integration.defaultDuration(transition);
+		if (ms > 0)
+			return ms;
+	}
+	const int ms = obs_frontend_get_transition_duration();
+	return ms > 0 ? ms : 300;
+}
+
 QStringList MarkProblems(const Mark &mark)
 {
 	QStringList problems;
@@ -193,8 +208,17 @@ QStringList MarkProblems(const Mark &mark)
 	}
 	if (mark.from.IsEmpty() || mark.to.IsEmpty())
 		problems << Tr("Warning.NoScenesSelected");
-	if (mark.UsableCandidates().empty())
+	const auto missingTransitions = MissingTransitions(mark);
+	if (!missingTransitions.empty()) {
+		QStringList names;
+		for (const auto &name : missingTransitions)
+			names << Utf8(name);
+		problems << Tr(mark.UsableCandidates().empty() ? "Warning.MissingTransitionsAll"
+							       : "Warning.MissingTransitions")
+				    .arg(names.join(", "));
+	} else if (mark.UsableCandidates().empty()) {
 		problems << Tr("Warning.NoUsableCandidates");
+	}
 
 	return problems;
 }
@@ -1483,6 +1507,9 @@ void TransitionTreeDialog::RefreshChecker()
 		case MatchOutcome::Wins:
 			hasWinner = true;
 			headline = Tr("Checker.Wins").arg(link, MarkSummary(mark).toHtmlEscaped());
+			if (GetIntegration().previewSwitch)
+				headline += QString(" <a href=\"preview:%1\">%2</a>")
+						    .arg(id, Tr("Checker.Preview").toHtmlEscaped());
 			break;
 		case MatchOutcome::LessSpecific:
 			lines << Tr("Checker.LessSpecific").arg(link);
@@ -1688,16 +1715,36 @@ void TransitionTreeDialog::RefreshCandidateTable(Mark &mark)
 		auto *transitionCombo = new QComboBox;
 		transitionCombo->addItems(transitions);
 		const QString current = Utf8(candidate.transition);
-		if (transitionCombo->findText(current) < 0 && !current.isEmpty())
-			transitionCombo->addItem(current);
+		if (transitionCombo->findText(current) < 0 && !current.isEmpty()) {
+			/* Kept so the rule still says what it wanted. */
+			transitionCombo->addItem(style()->standardIcon(QStyle::SP_MessageBoxWarning), current);
+			transitionCombo->setItemData(transitionCombo->count() - 1, Tr("Candidate.Missing"),
+						     Qt::ToolTipRole);
+		}
 		transitionCombo->setCurrentText(current);
+		if (!current.isEmpty() && !TransitionExists(candidate.transition))
+			transitionCombo->setToolTip(Tr("Candidate.Missing"));
 		connect(transitionCombo, &QComboBox::currentTextChanged, this, [this, row](const QString &text) {
 			if (m_updating)
 				return;
 			Mark *target = SelectedMark();
 			if (!target || row >= (int)target->candidates.size())
 				return;
-			target->candidates[(size_t)row].transition = text.toStdString();
+			Candidate &changed = target->candidates[(size_t)row];
+			const std::string next = text.toStdString();
+
+			/* A duration nobody chose (the previous transition's default)
+			 * follows the transition; one typed in by hand is kept. */
+			if (changed.duration == DefaultCandidateDuration(changed.transition)) {
+				changed.duration = DefaultCandidateDuration(next);
+				if (auto *spin =
+					    qobject_cast<QSpinBox *>(m_candidates->cellWidget(row, kCandDuration))) {
+					m_updating = true;
+					spin->setValue(changed.duration);
+					m_updating = false;
+				}
+			}
+			changed.transition = next;
 			RefreshMarkSummary(*target);
 			CommitChange(true);
 		});
@@ -1783,13 +1830,22 @@ void TransitionTreeDialog::RefreshCandidateTable(Mark &mark)
 		addRowAction(down, "Candidate.MoveDown", [this, row]() { MoveCandidate(row, 1); });
 
 		if (GetIntegration().editTransition) {
+			/* For a missing transition, the same button offers to create
+			 * a replacement instead. */
+			const bool missing = !candidate.transition.empty() && !TransitionExists(candidate.transition);
+			const bool canReplace = missing && GetIntegration().createTransition;
 			auto *edit = new QToolButton;
 			edit->setText(Tr("Candidate.EditGlyph"));
-			edit->setEnabled(!candidate.transition.empty());
-			const std::string transitionName = candidate.transition;
-			addRowAction(edit, "Candidate.Edit", [transitionName]() {
-				if (GetIntegration().editTransition)
-					GetIntegration().editTransition(transitionName);
+			edit->setEnabled(!candidate.transition.empty() && (!missing || canReplace));
+			addRowAction(edit, canReplace ? "Candidate.Replace" : "Candidate.Edit", [this, row]() {
+				Mark *target = SelectedMark();
+				if (!target || row >= (int)target->candidates.size())
+					return;
+				const std::string name = target->candidates[(size_t)row].transition;
+				if (!TransitionExists(name))
+					ReplaceMissingTransition(name);
+				else if (GetIntegration().editTransition)
+					GetIntegration().editTransition(name);
 			});
 		}
 
@@ -2285,6 +2341,45 @@ void TransitionTreeDialog::OnCheckerLink(const QString &link)
 		SelectMark(markId);
 	else if (kind == "prefer")
 		PreferMark(markId);
+	else if (kind == "preview")
+		PreviewCheckerSwitch(markId);
+}
+
+void TransitionTreeDialog::PreviewCheckerSwitch(const std::string &markId)
+{
+	const Integration &integration = GetIntegration();
+	Preset *preset = CurrentPreset();
+	const Mark *mark = preset ? preset->FindMark(markId) : nullptr;
+	if (!integration.previewSwitch || !mark)
+		return;
+
+	const auto usable = mark->UsableCandidates();
+	if (usable.empty())
+		return;
+
+	/* With several transitions, say which one; the engine's own pick is a
+	 * roll of the dice, which is no help when checking each of them. */
+	size_t chosen = usable.front();
+	if (usable.size() > 1) {
+		QMenu menu(this);
+		for (size_t index : usable) {
+			const Candidate &candidate = mark->candidates[index];
+			QAction *action = menu.addAction(
+				Tr("Mark.TransitionSummary")
+					.arg(Utf8(candidate.transition), QString::number(candidate.duration)));
+			action->setData((qulonglong)index);
+		}
+		QAction *picked = menu.exec(QCursor::pos());
+		if (!picked)
+			return;
+		chosen = (size_t)picked->data().toULongLong();
+	}
+
+	const Candidate &candidate = mark->candidates[chosen];
+	const std::string canvas = m_checkCanvas->count() > 0 ? m_checkCanvas->currentText().toStdString()
+							      : MainCanvasName();
+	integration.previewSwitch(candidate.transition, candidate.duration, canvas,
+				  m_checkFrom->currentText().toStdString(), m_checkTo->currentText().toStdString());
 }
 
 void TransitionTreeDialog::SelectMark(const std::string &markId)
@@ -2359,9 +2454,7 @@ void TransitionTreeDialog::AddCandidate()
 	const QStringList transitions = TransitionNames();
 	if (!transitions.isEmpty())
 		candidate.transition = transitions.first().toStdString();
-	candidate.duration = obs_frontend_get_transition_duration();
-	if (candidate.duration <= 0)
-		candidate.duration = 300;
+	candidate.duration = DefaultCandidateDuration(candidate.transition);
 
 	mark->candidates.push_back(candidate);
 	mark->ResetRuntimeState();
@@ -2490,7 +2583,7 @@ void TransitionTreeDialog::CreateTransition()
 {
 	const Integration &integration = GetIntegration();
 	if (integration.createTransition) {
-		const std::string name = integration.createTransition(this);
+		const std::string name = integration.createTransition(this, std::string());
 		if (name.empty())
 			return;
 
@@ -2502,9 +2595,7 @@ void TransitionTreeDialog::CreateTransition()
 		}
 		Candidate candidate;
 		candidate.transition = name;
-		candidate.duration = obs_frontend_get_transition_duration();
-		if (candidate.duration <= 0)
-			candidate.duration = 300;
+		candidate.duration = DefaultCandidateDuration(name);
 		mark->candidates.push_back(candidate);
 		mark->ResetRuntimeState();
 		RefreshMarkPage(*mark);
@@ -2525,6 +2616,25 @@ void TransitionTreeDialog::CreateTransition()
 	}
 
 	addButton->click();
+}
+
+void TransitionTreeDialog::ReplaceMissingTransition(const std::string &missing)
+{
+	const Integration &integration = GetIntegration();
+	if (!integration.createTransition || missing.empty())
+		return;
+
+	const std::string created = integration.createTransition(this, missing);
+	if (created.empty())
+		return;
+
+	/* Where the name can be chosen it is the missing one, so the rules
+	 * already point at it. Otherwise (OBS asks for the name itself) point
+	 * every rule and preset that used the old name at the new transition. */
+	RefreshTransitionHooks();
+	if (created != missing)
+		RenameTransitionReferences(missing, created);
+	RefreshAll();
 }
 
 /* ------------------------------------------------------------------------ */

@@ -35,6 +35,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <initializer_list>
 #include <cstring>
 
 using namespace TransitionList;
@@ -113,24 +114,23 @@ static QFrame *card()
 	return frame;
 }
 
-// Two-option switch (e.g. "Test colors | Program → Preview").
-static QFrame *segmented(QPushButton *a, QPushButton *b, QObject *owner)
+// Option switch (e.g. "Test colors | Program → Preview").
+static QFrame *segmented(std::initializer_list<QPushButton *> buttons, QObject *owner)
 {
 	auto *frame = new QFrame;
 	frame->setProperty("tmRole", "segGroup");
 	auto *h = new QHBoxLayout(frame);
 	h->setContentsMargins(3, 3, 3, 3);
 	h->setSpacing(3);
-	for (QPushButton *button : {a, b}) {
+	auto *group = new QButtonGroup(owner);
+	group->setExclusive(true);
+	for (QPushButton *button : buttons) {
 		button->setProperty("tmRole", "seg");
 		button->setCheckable(true);
 		button->setCursor(Qt::PointingHandCursor);
 		h->addWidget(button);
+		group->addButton(button);
 	}
-	auto *group = new QButtonGroup(owner);
-	group->setExclusive(true);
-	group->addButton(a);
-	group->addButton(b);
 	return frame;
 }
 
@@ -211,6 +211,9 @@ TransitionManagerWindow::TransitionManagerWindow(QWidget *parent) : QWidget(pare
 		stopPlayback(false);
 		probe_->cancel();
 		preview_->releaseScenes();
+		if (pinnedBtn_->isChecked())
+			colorsBtn_->setChecked(true);
+		pinnedBtn_->setVisible(false);
 		preview_->setTransition(nullptr);
 		props_->setSource(nullptr);
 		shown_ = nullptr;
@@ -436,11 +439,14 @@ QWidget *TransitionManagerWindow::buildPreviewCard()
 	scenesBtn_ = new QPushButton(tr("Program → Preview"));
 	colorsBtn_->setChecked(true);
 	scenesBtn_->setToolTip(tr("Outside studio mode, the scene after the program scene is used as the target."));
+	// Set from outside (a Transition Tree rule), so hidden until then.
+	pinnedBtn_ = new QPushButton;
+	pinnedBtn_->setVisible(false);
 
 	auto *sourcesRow = new QHBoxLayout;
 	sourcesRow->addWidget(roleLabel(tr("Preview between"), "muted"));
 	sourcesRow->addStretch();
-	sourcesRow->addWidget(segmented(colorsBtn_, scenesBtn_, this));
+	sourcesRow->addWidget(segmented({colorsBtn_, scenesBtn_, pinnedBtn_}, this));
 	colorsBtn_->setChecked(true);
 
 	auto *divider = new QFrame;
@@ -485,6 +491,13 @@ QWidget *TransitionManagerWindow::buildPreviewCard()
 		preview_->setSourceMode(TransitionPreview::SourceMode::Scenes);
 		updateEndpoints();
 	});
+	connect(pinnedBtn_, &QPushButton::toggled, this, [this](bool on) {
+		if (!on)
+			return;
+		stopPlayback(false);
+		preview_->setSourceMode(TransitionPreview::SourceMode::Pinned);
+		updateEndpoints();
+	});
 
 	return frame;
 }
@@ -510,7 +523,7 @@ QWidget *TransitionManagerWindow::buildDurationCard()
 	auto *titleRow = new QHBoxLayout;
 	titleRow->addWidget(roleLabel(tr("Duration"), "cardTitle"));
 	titleRow->addStretch();
-	titleRow->addWidget(segmented(obsDefaultBtn_, customBtn_, this));
+	titleRow->addWidget(segmented({obsDefaultBtn_, customBtn_}, this));
 	obsDefaultBtn_->setChecked(true);
 
 	durationSlider_ = new QSlider(Qt::Horizontal);
@@ -895,6 +908,7 @@ void TransitionManagerWindow::onSelectionChanged()
 	obs_source_t *source = selected();
 	if (source != shown_) {
 		stopPlayback(false);
+		previewDurationMs_ = -1; // belonged to the previous transition
 		shown_ = source;
 		shownName_ = source ? QString::fromUtf8(obs_source_get_name(source)) : QString();
 
@@ -1091,6 +1105,8 @@ int TransitionManagerWindow::previewLengthMs() const
 		return 300;
 	if (obs_transition_fixed(shown_))
 		return stingerTotalMs_ > 0 ? (int)stingerTotalMs_ : 1000;
+	if (previewDurationMs_ > 0)
+		return previewDurationMs_;
 	const int own = TransitionStore::instance().defaultDuration(shown_);
 	return own > 0 ? own : obs_frontend_get_transition_duration();
 }
@@ -1242,14 +1258,18 @@ void TransitionManagerWindow::onCreate(const QString &typeId)
 		selectSource(source);
 }
 
-obs_source_t *TransitionManagerWindow::createOfType(const QString &typeId, QWidget *dialogParent)
+obs_source_t *TransitionManagerWindow::createOfType(const QString &typeId, QWidget *dialogParent,
+						    const QString &suggestedName)
 {
 	auto &store = TransitionStore::instance();
 	const QByteArray id = typeId.toUtf8();
 	const char *display = obs_source_get_display_name(id.constData());
 	QString name;
 	if (!store.obsPrompts()) { // otherwise OBS asks for the name itself
-		const QString suggested = store.uniqueName(QString::fromUtf8(display ? display : id.constData()));
+		const QString suggested =
+			!suggestedName.isEmpty() && !store.nameTaken(suggestedName)
+				? suggestedName
+				: store.uniqueName(QString::fromUtf8(display ? display : id.constData()));
 		name = TransitionDialogs::askName(dialogParent, tr("New transition"), suggested);
 		if (name.isEmpty())
 			return nullptr;
@@ -1261,7 +1281,36 @@ obs_source_t *TransitionManagerWindow::createOfType(const QString &typeId, QWidg
 	return source;
 }
 
-obs_source_t *TransitionManagerWindow::createFromMenu(QWidget *parent, const QPoint &globalPos)
+void TransitionManagerWindow::previewSwitch(obs_source_t *transition, int durationMs, obs_source_t *fromScene,
+					    obs_source_t *toScene)
+{
+	if (!transition)
+		return;
+	open(transition);
+	if (selected() != transition)
+		return; // not in the list (e.g. filtered out of OBS's list)
+
+	preview_->setPinnedScenes(fromScene, toScene);
+	pinnedBtn_->setText(
+		QStringLiteral("%1 → %2").arg(QString::fromUtf8(fromScene ? obs_source_get_name(fromScene) : ""),
+					      QString::fromUtf8(toScene ? obs_source_get_name(toScene) : "")));
+	pinnedBtn_->setToolTip(tr("The scene switch picked in Transition Tree"));
+	pinnedBtn_->setVisible(true);
+	if (pinnedBtn_->isChecked()) {
+		stopPlayback(false);
+		preview_->refreshSources();
+		updateEndpoints();
+	} else {
+		pinnedBtn_->setChecked(true); // switches the preview's mode
+	}
+
+	// The rule's own duration, until another transition is selected.
+	previewDurationMs_ = obs_transition_fixed(transition) ? -1 : durationMs;
+	startPlayback();
+}
+
+obs_source_t *TransitionManagerWindow::createFromMenu(QWidget *parent, const QPoint &globalPos,
+						      const QString &suggestedName)
 {
 	if (!TransitionStore::instance().canEditList()) {
 		QMessageBox::information(parent, tr("New transition"),
@@ -1292,7 +1341,7 @@ obs_source_t *TransitionManagerWindow::createFromMenu(QWidget *parent, const QPo
 	if (!chosen || chosen->data().toString().isEmpty())
 		return nullptr;
 
-	obs_source_t *source = createOfType(chosen->data().toString(), parent);
+	obs_source_t *source = createOfType(chosen->data().toString(), parent, suggestedName);
 	if (source)
 		open(source); // its settings live here
 	return source;

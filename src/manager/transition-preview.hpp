@@ -15,6 +15,7 @@ public:
 	enum class SourceMode {
 		Colors, // two solid test colors
 		Scenes, // program scene -> preview scene (or the next scene outside studio mode)
+		Pinned, // two chosen scenes (see setPinnedScenes)
 	};
 
 	explicit TransitionPreview(QWidget *parent = nullptr);
@@ -24,6 +25,9 @@ public:
 	void syncSettings(obs_source_t *source);  // push edited settings into the copy
 
 	void setSourceMode(SourceMode mode);
+	// The endpoints used in Pinned mode. Held weakly, so a scene that's
+	// removed falls back to its test color.
+	void setPinnedScenes(obs_source_t *from, obs_source_t *to);
 	SourceMode sourceMode() const { return mode_; }
 	void refreshSources(); // re-read program/preview scenes in Scenes mode
 	void releaseScenes();  // drop scene references (scene collection unloading)
@@ -61,6 +65,9 @@ private:
 	OBSSourceAutoRelease colorB_;
 
 	SourceMode mode_ = SourceMode::Colors;
+	OBSWeakSource pinnedA_;
+	OBSWeakSource pinnedB_;
+
 	OBSSource sourceA_; // current "from" endpoint
 	OBSSource sourceB_; // current "to" endpoint
 

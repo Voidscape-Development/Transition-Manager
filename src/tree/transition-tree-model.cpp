@@ -131,7 +131,8 @@ std::vector<size_t> Mark::UsableCandidates() const
 {
 	std::vector<size_t> usable;
 	for (size_t i = 0; i < candidates.size(); i++) {
-		if (candidates[i].enabled && !candidates[i].transition.empty())
+		if (candidates[i].enabled && !candidates[i].transition.empty() &&
+		    TransitionExists(candidates[i].transition))
 			usable.push_back(i);
 	}
 	return usable;

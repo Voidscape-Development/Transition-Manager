@@ -97,6 +97,15 @@ void TransitionPreview::updateEndpoints()
 			b = next;
 	}
 
+	if (mode_ == SourceMode::Pinned) {
+		OBSSourceAutoRelease from = obs_weak_source_get_source(pinnedA_);
+		OBSSourceAutoRelease to = obs_weak_source_get_source(pinnedB_);
+		if (from)
+			a = from.Get();
+		if (to)
+			b = to.Get();
+	}
+
 	sourceA_ = a;
 	sourceB_ = b;
 }
@@ -126,6 +135,16 @@ void TransitionPreview::setSourceMode(SourceMode mode)
 	refreshSources();
 }
 
+void TransitionPreview::setPinnedScenes(obs_source_t *from, obs_source_t *to)
+{
+	OBSWeakSourceAutoRelease weakFrom = from ? obs_source_get_weak_source(from) : nullptr;
+	OBSWeakSourceAutoRelease weakTo = to ? obs_source_get_weak_source(to) : nullptr;
+	pinnedA_ = weakFrom.Get();
+	pinnedB_ = weakTo.Get();
+	if (mode_ == SourceMode::Pinned)
+		refreshSources();
+}
+
 void TransitionPreview::refreshSources()
 {
 	updateEndpoints();
@@ -140,6 +159,8 @@ void TransitionPreview::releaseScenes()
 	}
 	sourceA_ = colorA_.Get();
 	sourceB_ = colorB_.Get();
+	pinnedA_ = nullptr;
+	pinnedB_ = nullptr;
 	if (copy_)
 		obs_transition_set(copy_, sourceA_);
 }

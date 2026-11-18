@@ -88,6 +88,17 @@ The two parts are independent, but each is aware of the other:
   Transition…** picks a type, creates it the same way the manager does, opens
   its settings in the manager and adds it to the selected rule. The editor's
   bottom bar has a **Transition Manager** button.
+- **Durations.** A transition added to a rule starts with the custom duration
+  set for it in the manager. Switching a rule's transition carries the new
+  one's duration over too, unless you typed a duration yourself.
+- **Missing transitions.** A rule that names a transition that no longer exists
+  shows a warning and skips it. Its **✎** button then creates a replacement
+  (suggesting the old name) and points every rule that used the old name at it.
+- **Preview a switch.** In **Which Rule Wins?**, **▶ Preview** plays the
+  winning rule's transition in the manager's preview, between the two scenes
+  you picked and at the rule's duration. With several transitions you choose
+  which. The scene pair stays available as a third **Preview between**
+  option, and as everywhere in the preview, program output is never touched.
 - **From a transition to its rules.** The manager's header says how many
   Transition Tree rules and preset defaults use the selected transition, and
   so does the removal prompt. **Rules Using This Transition…** in the window's
