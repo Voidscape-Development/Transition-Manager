@@ -4,6 +4,11 @@ A **Transition Manager** dock that works like OBS's own Scene Transitions dock,
 plus a full **Transition Manager window** for creating, editing, previewing,
 duplicating, renaming, reordering and removing scene transitions.
 
+It also includes **[Transition Tree](docs/transition-tree.md)**: rules that
+choose which transition plays for each scene switch, with presets, several
+transitions per rule, hotkeys and obs-websocket control. The manager is about
+*what* your transitions are; Transition Tree is about *when* each one plays.
+
 Targets OBS Studio 33+ and Qt 6. Built on the
 [obs-plugintemplate](https://github.com/obsproject/obs-plugintemplate).
 
@@ -70,22 +75,73 @@ make it.
   for you, like OBS's.
 - Names must be unique, as in OBS.
 
+## Transition Tree
+
+Open it from **Tools → Transition Tree**. Its full documentation, including
+the rule-matching order and the obs-websocket API, is in
+[docs/transition-tree.md](docs/transition-tree.md).
+
+The two parts are independent, but each is aware of the other:
+
+- **From a rule to its transitions.** Each transition in a rule has an
+  **✎** button that opens it in the Transition Manager window. **New
+  Transition…** picks a type, creates it the same way the manager does, opens
+  its settings in the manager and adds it to the selected rule. The editor's
+  bottom bar has a **Transition Manager** button.
+- **Durations.** A transition added to a rule starts with the custom duration
+  set for it in the manager. Switching a rule's transition carries the new
+  one's duration over too, unless you typed a duration yourself.
+- **Missing transitions.** A rule that names a transition that no longer exists
+  shows a warning and skips it. Its **✎** button then creates a replacement
+  (suggesting the old name) and points every rule that used the old name at it.
+- **Preview a switch.** In **Which Rule Wins?**, **▶ Preview** plays the
+  winning rule's transition in the manager's preview, between the two scenes
+  you picked and at the rule's duration. With several transitions you choose
+  which. The scene pair stays available as a third **Preview between**
+  option, and as everywhere in the preview, program output is never touched.
+- **From a transition to its rules.** The manager's header says how many
+  Transition Tree rules and preset defaults use the selected transition, and
+  so does the removal prompt. **Rules Using This Transition…** in the window's
+  and dock's **⋮** menus opens Transition Tree filtered to that transition.
+- **Renames are followed.** Renaming a transition, here or in OBS, updates every
+  rule and preset default that used the old name.
+
+### Moving from the standalone Transition Tree plugin
+
+Remove the standalone `transition-tree` plugin. Everything carries over:
+local presets, hotkeys and settings stay in the scene collection under the
+same key, the obs-websocket vendor is still `transition-tree`, and global
+presets are copied from the old plugin's config folder on first start.
+
+While the standalone plugin is still installed, the copy included here stays
+off so the two don't fight over the same hotkeys, scene overrides and
+websocket vendor; a warning in the OBS log says so.
+
 ## Layout
 
-| File | Role |
+The source is split so each part can be read and changed on its own.
+`manager/` and `tree/` never include each other; `bridge/` is the only code
+that knows both, and talks to them through optional hooks
+(`manager/manager-hooks.hpp` and `tt::Integration` in `tree/transition-tree.hpp`).
+
+| Path | Role |
 |---|---|
-| `src/plugin-main.cpp` | Module entry. Starts the store, creates the window, registers the dock and the Tools menu item |
-| `src/transitions-dock.*` | The compact dock modelled on OBS's Scene Transitions dock |
-| `src/transition-manager-window.*` | The full window: sidebar list, header actions, preview, duration and settings |
-| `src/transition-list.*` | Item roles and painting for the sidebar list (sections, type icons, badges) |
-| `src/tm-style.*` | Palette-derived colors, SVG icons and the window style sheet |
-| `src/timeline-slider.hpp` | Scrub slider that can mark a Stinger's transition point |
-| `src/media-probe.*` | Measures a Stinger video's length and frame count the same way the Stinger does |
-| `src/transition-dialogs.*` | Name, rename and remove prompts shared by the dock and the window |
-| `src/transition-store.*` | Reads and edits OBS's transition list, hooks transitions it creates into OBS's scene-switch signals, and saves per-transition durations under the `transition_manager` key of the scene collection |
-| `src/obs-qt-types.hpp` | Declares the `OBSSource` Qt metatype under the same name OBS uses, so entries added here are readable by OBS |
-| `src/transition-preview.*` | Native `obs_display` that renders a private copy of the selected transition between test colors or real scenes |
-| `src/properties-panel.*` | Builds Qt widgets from `obs_properties_t` and writes changes back |
+| `src/plugin-main.cpp` | Module entry. Loads the manager, then (after every module has loaded) Transition Tree and the bridge |
+| `src/bridge/` | Fills in each part's hooks so they link up (see above) |
+| `src/tree/` | Transition Tree: rule model and serialization (`-model`), the override engine (`-engine`), editor (`-dialog`), obs-websocket vendor (`-websocket`) and its module lifecycle, hooks and rename tracking (`-integration`) |
+| `src/manager/manager-module.*` | The manager's lifecycle: starts the store, creates the window, registers the dock and the Tools menu item |
+| `src/manager/manager-hooks.*` | Optional extension points other parts can fill in |
+| `src/manager/transitions-dock.*` | The compact dock modelled on OBS's Scene Transitions dock |
+| `src/manager/transition-manager-window.*` | The full window: sidebar list, header actions, preview, duration and settings |
+| `src/manager/transition-list.*` | Item roles and painting for the sidebar list (sections, type icons, badges) |
+| `src/manager/tm-style.*` | Palette-derived colors, SVG icons and the window style sheet |
+| `src/manager/timeline-slider.hpp` | Scrub slider that can mark a Stinger's transition point |
+| `src/manager/media-probe.*` | Measures a Stinger video's length and frame count the same way the Stinger does |
+| `src/manager/transition-dialogs.*` | Name, rename and remove prompts shared by the dock and the window |
+| `src/manager/transition-store.*` | Reads and edits OBS's transition list, hooks transitions it creates into OBS's scene-switch signals, and saves per-transition durations under the `transition_manager` key of the scene collection |
+| `src/manager/obs-qt-types.hpp` | Declares the `OBSSource` Qt metatype under the same name OBS uses, so entries added here are readable by OBS |
+| `src/manager/transition-preview.*` | Native `obs_display` that renders a private copy of the selected transition between test colors or real scenes |
+| `src/manager/properties-panel.*` | Builds Qt widgets from `obs_properties_t` and writes changes back |
 
 ## Building
 
@@ -103,6 +159,9 @@ On Ubuntu 26.04 you can also build against OBS Studio 33 from the OBS PPA
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
 ```
+
+Transition Tree is included by default. To build the manager alone, configure
+with `-DENABLE_TRANSITION_TREE=OFF`.
 
 Then install it with `cmake --install build --prefix /usr`, which places the module in
 `/usr/lib/<arch>/obs-modules/plugins/` and its data in `/usr/share/obs/obs-modules/plugins/obs-transition-manager/`.
