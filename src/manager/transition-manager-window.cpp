@@ -1,5 +1,6 @@
 #include "transition-manager-window.hpp"
 
+#include "manager-hooks.hpp"
 #include "media-probe.hpp"
 #include "properties-panel.hpp"
 #include "timeline-slider.hpp"
@@ -936,14 +937,24 @@ void TransitionManagerWindow::updateHeader()
 
 	nameLabel_->setText(QString::fromUtf8(obs_source_get_name(source)));
 	const QString type = QString::fromUtf8(obs_source_get_display_name(obs_source_get_id(source)));
-	subtitle_->setText(active ? tr("%1 · used for scene switches right now").arg(type)
-				  : tr("%1 · not active").arg(type));
+	QString subtitle = active ? tr("%1 · used for scene switches right now").arg(type)
+				  : tr("%1 · not active").arg(type);
+	const QString usage = ManagerHooks::usage(source);
+	if (!usage.isEmpty())
+		subtitle += QStringLiteral(" · ") + usage;
+	subtitle_->setText(subtitle);
 
 	renameBtn_->setVisible(editable);
 	duplicateBtn_->setEnabled(editable);
 	activateBtn_->setVisible(!active);
 	activePill_->setVisible(active);
 	resetBtn_->setEnabled(obs_source_configurable(source));
+}
+
+void TransitionManagerWindow::refreshUsage()
+{
+	if (shown_)
+		updateHeader();
 }
 
 void TransitionManagerWindow::updateDurationCard()
@@ -1197,6 +1208,11 @@ QMenu *TransitionManagerWindow::buildActionsMenu(QWidget *parent)
 			&TransitionManagerWindow::onDuplicate)
 		->setEnabled(source && editable);
 	menu->addSeparator();
+	if (ManagerHooks::hasRules()) {
+		OBSSource keep(source);
+		menu->addAction(ManagerHooks::get().openRulesLabel, this, [keep] { ManagerHooks::openRules(keep); });
+		menu->addSeparator();
+	}
 
 	QAction *remove = menu->addAction(TMStyle::icon(QStringLiteral("trash"), colors_.text), tr("Remove"), this,
 					  &TransitionManagerWindow::onRemove);
@@ -1222,22 +1238,64 @@ void TransitionManagerWindow::showContextMenu(const QPoint &pos)
 
 void TransitionManagerWindow::onCreate(const QString &typeId)
 {
+	if (obs_source_t *source = createOfType(typeId, this))
+		selectSource(source);
+}
+
+obs_source_t *TransitionManagerWindow::createOfType(const QString &typeId, QWidget *dialogParent)
+{
 	auto &store = TransitionStore::instance();
 	const QByteArray id = typeId.toUtf8();
 	const char *display = obs_source_get_display_name(id.constData());
 	QString name;
 	if (!store.obsPrompts()) { // otherwise OBS asks for the name itself
 		const QString suggested = store.uniqueName(QString::fromUtf8(display ? display : id.constData()));
-		name = TransitionDialogs::askName(this, tr("New transition"), suggested);
+		name = TransitionDialogs::askName(dialogParent, tr("New transition"), suggested);
 		if (name.isEmpty())
-			return;
+			return nullptr;
 	}
 
 	obs_source_t *source = store.createTransition(id.constData(), name);
+	if (!source && !store.obsPrompts()) // with OBS's dialog, nullptr usually means cancelled
+		QMessageBox::warning(dialogParent, tr("New transition"), tr("The transition couldn't be created."));
+	return source;
+}
+
+obs_source_t *TransitionManagerWindow::createFromMenu(QWidget *parent, const QPoint &globalPos)
+{
+	if (!TransitionStore::instance().canEditList()) {
+		QMessageBox::information(parent, tr("New transition"),
+					 tr("OBS's transition list couldn't be accessed, so transitions can't be added "
+					    "from here. Add it from OBS's Scene Transitions dock instead."));
+		return nullptr;
+	}
+
+	QMenu menu(parent);
+	const char *id = nullptr;
+	for (size_t i = 0; obs_enum_transition_types(i, &id); ++i) {
+		const uint32_t flags = obs_get_source_output_flags(id);
+		if (flags & (OBS_SOURCE_DEPRECATED | OBS_SOURCE_CAP_DISABLED))
+			continue;
+		if (!obs_is_source_configurable(id))
+			continue;
+		const char *display = obs_source_get_display_name(id);
+		QAction *action =
+			menu.addAction(TMStyle::typeIcon(id, colors_.text), QString::fromUtf8(display ? display : id));
+		action->setData(QString::fromUtf8(id));
+		action->setToolTip(TMStyle::typeDescription(id));
+	}
+	if (menu.isEmpty())
+		menu.addAction(tr("No configurable transition types available"))->setEnabled(false);
+	menu.setToolTipsVisible(true);
+
+	QAction *chosen = menu.exec(globalPos);
+	if (!chosen || chosen->data().toString().isEmpty())
+		return nullptr;
+
+	obs_source_t *source = createOfType(chosen->data().toString(), parent);
 	if (source)
-		selectSource(source);
-	else if (!store.obsPrompts()) // with OBS's dialog, nullptr usually means cancelled
-		QMessageBox::warning(this, tr("New transition"), tr("The transition couldn't be created."));
+		open(source); // its settings live here
+	return source;
 }
 
 void TransitionManagerWindow::onDuplicate()

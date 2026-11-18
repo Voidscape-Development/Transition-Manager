@@ -38,6 +38,15 @@ public:
 	// Show, raise and focus the window, selecting `source` if given.
 	void open(obs_source_t *source = nullptr);
 
+	// Re-reads what else uses the shown transition (see ManagerHooks::usage).
+	void refreshUsage();
+
+	// For other components: shows a menu of transition types at `globalPos`,
+	// creates the chosen one (asking for its name, or letting OBS ask) and
+	// opens this window on it so its settings can be edited. Returns the new
+	// transition (borrowed; OBS's list owns it) or nullptr if cancelled.
+	obs_source_t *createFromMenu(QWidget *parent, const QPoint &globalPos);
+
 protected:
 	void showEvent(QShowEvent *event) override;
 	void hideEvent(QHideEvent *event) override;
@@ -65,6 +74,7 @@ private:
 	obs_source_t *selected() const;
 	void selectSource(obs_source_t *source);
 	void populateNewMenu(QMenu *menu);
+	obs_source_t *createOfType(const QString &typeId, QWidget *dialogParent);
 	void showContextMenu(const QPoint &pos);
 	QMenu *buildActionsMenu(QWidget *parent);
 

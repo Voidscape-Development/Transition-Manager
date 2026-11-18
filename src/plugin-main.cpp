@@ -16,55 +16,98 @@ You should have received a copy of the GNU General Public License along
 with this program. If not, see <https://www.gnu.org/licenses/>
 */
 
+// One OBS module, two independent components:
+//
+//  - manager/  Transition Manager: the dock and window for creating, editing
+//              and previewing transitions.
+//  - tree/     Transition Tree: rules that pick the transition for each scene
+//              switch (built when ENABLE_TRANSITION_TREE is on).
+//  - bridge/   The glue that lets each use the other. Neither component
+//              depends on it or on each other.
+
 #include <obs-module.h>
 #include <obs-frontend-api.h>
 #include <plugin-support.h>
 
-#include <QMainWindow>
+#include <cstring>
 
-#include "transition-manager-window.hpp"
-#include "transition-store.hpp"
-#include "transitions-dock.hpp"
+#include "manager/manager-module.hpp"
+
+#ifdef TM_WITH_TRANSITION_TREE
+#include "bridge/bridge.hpp"
+#include "tree/transition-tree.hpp"
+#endif
 
 OBS_DECLARE_MODULE()
+OBS_MODULE_AUTHOR("Voidscape Development")
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 
 MODULE_EXPORT const char *obs_module_name(void)
 {
-	return "Transition Manager";
+	return obs_module_text("PluginName");
 }
 
 MODULE_EXPORT const char *obs_module_description(void)
 {
-	return "Dock for creating, editing, previewing, duplicating and organizing scene transitions.";
+	return obs_module_text("PluginDescription");
 }
+
+#ifdef TM_WITH_TRANSITION_TREE
+static bool g_treeLoaded = false;
+
+// The standalone Transition Tree plugin registers the same hotkeys, websocket
+// vendor, proc handler and save data. If it's still installed, let it keep
+// running on its own and leave the bundled copy off.
+static bool standaloneTreeLoaded()
+{
+	bool found = false;
+	obs_enum_modules(
+		[](void *param, obs_module_t *module) {
+			const char *file = obs_get_module_file_name(module);
+			if (module != obs_current_module() && file && strstr(file, "transition-tree"))
+				*static_cast<bool *>(param) = true;
+		},
+		&found);
+	return found;
+}
+#endif
 
 bool obs_module_load(void)
 {
-	TransitionStore::instance().init();
-
-	auto *main = static_cast<QMainWindow *>(obs_frontend_get_main_window());
-
-	// The full editor is a separate window, owned by the main window and
-	// hidden until opened from the dock or the Tools menu.
-	auto *window = new TransitionManagerWindow(main);
-	auto *dock = new TransitionsDock(window, main);
-
-	// OBS 30+: OBS takes ownership of the widget.
-	if (!obs_frontend_add_dock_by_id("transition_manager_dock", "Transition Manager", dock)) {
-		obs_log(LOG_WARNING, "failed to add dock");
-		delete dock;
-	}
-
-	obs_frontend_add_tools_menu_item(
-		"Transition Manager", [](void *data) { static_cast<TransitionManagerWindow *>(data)->open(); }, window);
+	if (!ManagerModule::load())
+		return false;
 
 	obs_log(LOG_INFO, "plugin loaded successfully (version %s)", PLUGIN_VERSION);
 	return true;
 }
 
+void obs_module_post_load(void)
+{
+#ifdef TM_WITH_TRANSITION_TREE
+	// Started here rather than in obs_module_load() so every other module is
+	// loaded and a standalone Transition Tree can be detected.
+	if (standaloneTreeLoaded()) {
+		obs_log(LOG_WARNING, "the standalone Transition Tree plugin is installed; its built-in copy stays off. "
+				     "Remove the standalone plugin to use the one included here.");
+		return;
+	}
+
+	tt::ModuleLoad();
+	tt::ModulePostLoad();
+	Bridge::connect();
+	g_treeLoaded = true;
+#endif
+}
+
 void obs_module_unload(void)
 {
-	TransitionStore::instance().shutdown();
+#ifdef TM_WITH_TRANSITION_TREE
+	if (g_treeLoaded) {
+		Bridge::disconnect();
+		tt::ModuleUnload();
+		g_treeLoaded = false;
+	}
+#endif
+	ManagerModule::unload();
 	obs_log(LOG_INFO, "plugin unloaded");
 }

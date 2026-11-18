@@ -1,4 +1,5 @@
 #include "transitions-dock.hpp"
+#include "manager-hooks.hpp"
 
 #include "transition-dialogs.hpp"
 #include "transition-manager-window.hpp"
@@ -253,6 +254,8 @@ void TransitionsDock::showPropsMenu()
 	    })->setEnabled(obs_source_configurable(source));
 	menu.addSeparator();
 	menu.addAction(tr("Open Transition Manager"), this, [this, keep] { window_->open(keep); });
+	if (ManagerHooks::hasRules())
+		menu.addAction(ManagerHooks::get().openRulesLabel, this, [keep] { ManagerHooks::openRules(keep); });
 
 	menu.exec(propsBtn_->mapToGlobal(QPoint(0, propsBtn_->height())));
 }

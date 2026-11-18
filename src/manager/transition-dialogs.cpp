@@ -1,4 +1,5 @@
 #include "transition-dialogs.hpp"
+#include "manager-hooks.hpp"
 #include "transition-store.hpp"
 
 #include <QCoreApplication>
@@ -51,14 +52,34 @@ bool remove(QWidget *parent, obs_source_t *source, bool allowActive)
 	auto &store = TransitionStore::instance();
 	if (!source || !store.canRemove(source, allowActive))
 		return false;
-	if (store.obsPrompts())
-		return store.removeTransition(source, allowActive); // OBS confirms
+	const QString name = QString::fromUtf8(obs_source_get_name(source));
+	const QString usage = ManagerHooks::usage(source);
 
-	const auto answer = QMessageBox::question(
-		parent, tr("Remove transition"),
-		tr("Remove \"%1\"? This can't be undone.\n\nQuick transition buttons that use it keep working until "
-		   "OBS restarts.")
-			.arg(QString::fromUtf8(obs_source_get_name(source))));
+	if (store.obsPrompts()) {
+		// OBS confirms the removal itself, but doesn't know what else uses
+		// the transition, so warn about that first.
+		if (!usage.isEmpty()) {
+			const auto answer = QMessageBox::question(
+				parent, tr("Remove transition"),
+				tr("%1.\n\nRemove \"%2\" anyway? Transition Tree keeps referring to "
+				   "it by name; while it's missing, OBS uses its current transition instead.")
+					.arg(usage, name));
+			if (answer != QMessageBox::Yes)
+				return false;
+		}
+		return store.removeTransition(source, allowActive);
+	}
+
+	QString text = tr("Remove \"%1\"? This can't be undone.\n\nQuick transition buttons that use it keep working "
+			  "until OBS restarts.")
+			       .arg(name);
+	if (!usage.isEmpty())
+		text += QStringLiteral("\n\n") +
+			tr("%1. Transition Tree keeps referring to it by name; while it's missing, OBS uses its current "
+			   "transition instead.")
+				.arg(usage);
+
+	const auto answer = QMessageBox::question(parent, tr("Remove transition"), text);
 	return answer == QMessageBox::Yes && store.removeTransition(source, allowActive);
 }
 

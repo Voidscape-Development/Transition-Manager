@@ -37,30 +37,57 @@ set_target_properties(
   PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON
 )
 
+# Transition Manager: the dock and window. Always built.
 target_sources(
   ${CMAKE_PROJECT_NAME}
   PRIVATE
     src/plugin-main.cpp
-    src/obs-qt-types.hpp
-    src/transition-store.hpp
-    src/transition-store.cpp
-    src/transition-preview.hpp
-    src/transition-preview.cpp
-    src/properties-panel.hpp
-    src/properties-panel.cpp
-    src/transition-manager-window.hpp
-    src/transition-manager-window.cpp
-    src/transition-dialogs.hpp
-    src/transition-dialogs.cpp
-    src/transitions-dock.hpp
-    src/transitions-dock.cpp
-    src/tm-style.hpp
-    src/tm-style.cpp
-    src/transition-list.hpp
-    src/transition-list.cpp
-    src/timeline-slider.hpp
-    src/media-probe.hpp
-    src/media-probe.cpp
+    src/manager/manager-hooks.hpp
+    src/manager/manager-hooks.cpp
+    src/manager/manager-module.hpp
+    src/manager/manager-module.cpp
+    src/manager/obs-qt-types.hpp
+    src/manager/transition-store.hpp
+    src/manager/transition-store.cpp
+    src/manager/transition-preview.hpp
+    src/manager/transition-preview.cpp
+    src/manager/properties-panel.hpp
+    src/manager/properties-panel.cpp
+    src/manager/transition-manager-window.hpp
+    src/manager/transition-manager-window.cpp
+    src/manager/transition-dialogs.hpp
+    src/manager/transition-dialogs.cpp
+    src/manager/transitions-dock.hpp
+    src/manager/transitions-dock.cpp
+    src/manager/tm-style.hpp
+    src/manager/tm-style.cpp
+    src/manager/transition-list.hpp
+    src/manager/transition-list.cpp
+    src/manager/timeline-slider.hpp
+    src/manager/media-probe.hpp
+    src/manager/media-probe.cpp
 )
+
+# Transition Tree: per-switch transition rules, plus the bridge that links it
+# with the manager. Turn off to build the manager on its own.
+option(ENABLE_TRANSITION_TREE "Include Transition Tree's scene-switch rules" ON)
+
+if(ENABLE_TRANSITION_TREE)
+  target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE TM_WITH_TRANSITION_TREE)
+  target_sources(
+    ${CMAKE_PROJECT_NAME}
+    PRIVATE
+      src/tree/obs-websocket-api.h
+      src/tree/transition-tree.hpp
+      src/tree/transition-tree-dialog.hpp
+      src/tree/transition-tree-dialog.cpp
+      src/tree/transition-tree-engine.cpp
+      src/tree/transition-tree-integration.cpp
+      src/tree/transition-tree-model.cpp
+      src/tree/transition-tree-websocket.cpp
+      src/bridge/bridge.hpp
+      src/bridge/bridge.cpp
+  )
+endif()
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
