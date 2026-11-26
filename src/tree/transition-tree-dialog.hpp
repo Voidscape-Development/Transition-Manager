@@ -223,6 +223,7 @@ private:
 	QWidget *m_modeRow = nullptr;
 	QComboBox *m_modeCombo = nullptr;
 	QTableWidget *m_candidates = nullptr;
+	QLabel *m_markActions = nullptr;
 
 	/* --- preset page --- */
 	QLabel *m_presetTitle = nullptr;

@@ -64,6 +64,25 @@ make it.
   settings update as you edit. Luma Wipe's image is picked from thumbnails of
   the actual wipe images. Changes apply immediately and are mirrored into the
   preview.
+- **Stinger transition point.** **Detect transition point** plays the video
+  privately and measures how much of the screen each frame covers (its alpha,
+  or the track matte's brightness, inverted if the matte is). It suggests the
+  middle of the stretch where it covers the most, in the Stinger's own unit
+  (ms or frames), says whether the video has sound, and **Use it** applies it.
+- **Actions.** Run something when a transition starts or ends: mute, unmute or
+  toggle mute, set a source's volume, show or hide a source, restart a media
+  source, or press any OBS or source hotkey, each with an optional delay.
+  **Edit…** sets the selected transition's actions, **Global actions…** those
+  of every transition, and each Transition Tree rule has its own. When a
+  transition plays, the global actions run, then the transition's, then those
+  of the rule that picked it. A transition or rule can **replace broader
+  actions** instead. The preview never runs actions.
+- **Transition packs.** **⋮ → Export Pack…** saves the chosen transitions with
+  their media (Stinger videos, mattes, images), custom durations and actions,
+  and optionally the Transition Tree presets that use them, as one `.tmpack`
+  file (an uncompressed zip). **Import Pack…** (in **⋮** or **New**) copies the
+  media into the plugin's config folder (`packs/<pack name>/`), adds the
+  transitions under unique names and points imported presets at them.
 - **Theme-aware.** Colors and icons come from the current OBS theme, light or
   dark, and update when you switch themes.
 
@@ -120,7 +139,8 @@ websocket vendor; a warning in the OBS log says so.
 ## Layout
 
 The source is split so each part can be read and changed on its own.
-`manager/` and `tree/` never include each other; `bridge/` is the only code
+`manager/` and `tree/` never include each other (both may use the shared
+`actions/`); `bridge/` is the only code
 that knows both, and talks to them through optional hooks
 (`manager/manager-hooks.hpp` and `tt::Integration` in `tree/transition-tree.hpp`).
 
@@ -136,6 +156,9 @@ that knows both, and talks to them through optional hooks
 | `src/manager/transition-list.*` | Item roles and painting for the sidebar list (sections, type icons, badges) |
 | `src/manager/tm-style.*` | Palette-derived colors, SVG icons and the window style sheet |
 | `src/manager/timeline-slider.hpp` | Scrub slider that can mark a Stinger's transition point |
+| `src/manager/stinger-analyzer.*` | Plays a Stinger's video privately and finds its transition point from the frames' coverage |
+| `src/manager/transition-pack.*` | Exports and imports `.tmpack` transition packs (a minimal stored zip) |
+| `src/actions/` | Start and end actions: the model, the editor, and the runtime that hooks every transition, saved under the `transition_actions` key of the scene collection. Shared by the manager and Transition Tree, and depends on neither |
 | `src/manager/media-probe.*` | Measures a Stinger video's length and frame count the same way the Stinger does |
 | `src/manager/transition-dialogs.*` | Name, rename and remove prompts shared by the dock and the window |
 | `src/manager/transition-store.*` | Reads and edits OBS's transition list, hooks transitions it creates into OBS's scene-switch signals, and saves per-transition durations under the `transition_manager` key of the scene collection |
@@ -186,6 +209,11 @@ macOS signing work exactly as in the plugin template. See the
   are unaffected.
 - **Quick transitions.** Removing a transition used by a quick-transition button
   leaves that button working with the removed transition until OBS restarts.
+- **Packs on OBS 32+.** OBS asks for each imported transition's name itself,
+  as it does for every new transition there.
+- **Rule actions follow the rule that armed the switch.** They run when the
+  switch uses the transition the rule picked. A quick transition or another
+  plugin's override runs only the global and transition actions.
 - **Durations are stored by name,** the same way OBS stores per-scene transition
   overrides. Renaming in this plugin carries the duration over. Renaming in OBS's
   own dialog doesn't.

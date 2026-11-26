@@ -501,6 +501,26 @@ std::vector<MatchExplanation> ExplainSwitch(const Preset &preset, const std::str
 	return matches;
 }
 
+const TransitionActions::ActionSet *ArmedActions(obs_source_t *transition, const std::string &toScene)
+{
+	Preset *preset = GetStore().Active();
+	const char *name = obs_source_get_name(transition);
+	if (!preset || !name)
+		return nullptr;
+	/* Scene names are unique across canvases, so the destination finds the
+	 * pick; the transition confirms OBS actually used it. */
+	for (const auto &canvas : g_armed) {
+		auto pick = canvas.second.find(toScene);
+		if (pick == canvas.second.end())
+			continue;
+		const Mark *mark = preset->FindMark(pick->second.markId);
+		if (mark && pick->second.candidate >= 0 && (size_t)pick->second.candidate < mark->candidates.size() &&
+		    mark->candidates[(size_t)pick->second.candidate].transition == name)
+			return &mark->actions;
+	}
+	return nullptr;
+}
+
 Mark *ResolveMark(const std::string &canvas, const std::string &fromScene, const std::string &toScene)
 {
 	Store &store = GetStore();

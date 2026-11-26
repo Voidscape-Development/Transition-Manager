@@ -21,6 +21,8 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #include <obs.h>
 #include <obs-hotkey.h>
 
+#include "../actions/transition-actions.hpp"
+
 #include <functional>
 #include <string>
 #include <vector>
@@ -94,6 +96,7 @@ struct Mark {
 	std::vector<Candidate> candidates;
 	SelectionMode mode = SelectionMode::Sequential;
 	bool enabled = true;
+	TransitionActions::ActionSet actions; /* run when this mark drives a switch */
 
 	/* Runtime state. Lives for the session only: it is deliberately not
 	 * serialized, and is reset whenever a preset is activated. */
@@ -230,6 +233,11 @@ void ClearOverrides();
  * advance sequential state. Returns false when no mark matches. */
 bool ResolveTransition(const std::string &canvas, const std::string &fromScene, const std::string &toScene,
 		       std::string &transition, int &duration);
+
+/* The actions of the mark armed to drive a switch to `toScene` with
+ * `transition`, or nullptr. Must run before the switch re-arms the engine,
+ * i.e. from the transition's start signal. */
+const TransitionActions::ActionSet *ArmedActions(obs_source_t *transition, const std::string &toScene);
 
 /* Finds the mark that would drive a given switch, or nullptr. */
 Mark *ResolveMark(const std::string &canvas, const std::string &fromScene, const std::string &toScene);

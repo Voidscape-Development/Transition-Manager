@@ -66,6 +66,13 @@ target_sources(
     src/manager/timeline-slider.hpp
     src/manager/media-probe.hpp
     src/manager/media-probe.cpp
+    src/manager/stinger-analyzer.hpp
+    src/manager/stinger-analyzer.cpp
+    src/manager/transition-pack.hpp
+    src/manager/transition-pack.cpp
+    src/actions/transition-actions.hpp
+    src/actions/transition-actions.cpp
+    src/actions/transition-actions-editor.cpp
 )
 
 # Transition Tree: per-switch transition rules, plus the bridge that links it

@@ -19,6 +19,7 @@ class QSlider;
 class QSpinBox;
 class QStackedWidget;
 class MediaProbe;
+class StingerAnalyzer;
 class PropertiesPanel;
 class TimelineSlider;
 class TransitionPreview;
@@ -77,6 +78,7 @@ private:
 	QWidget *buildPreviewCard();
 	QWidget *buildDurationCard();
 	QWidget *buildSettingsCard();
+	QWidget *buildActionsCard();
 
 	void applyStyle();
 	obs_source_t *selected() const;
@@ -91,6 +93,8 @@ private:
 	void updateDurationCard();
 	void updateEndpoints();
 	void updateStingerInfo();
+	void updateActions();
+	void onDetect();
 
 	// Preview playback
 	int previewLengthMs() const;
@@ -149,6 +153,14 @@ private:
 	QLabel *fixedText_ = nullptr;
 	QLabel *fixedIcon_ = nullptr;
 	void showFixedDuration(bool fixed);
+	QWidget *detectRow_ = nullptr;
+	QPushButton *detectBtn_ = nullptr;
+	QLabel *detectText_ = nullptr;
+	QPushButton *usePointBtn_ = nullptr;
+	qint64 detectedPoint_ = -1; // in the Stinger's own unit (ms or frames)
+	StingerAnalyzer *analyzer_ = nullptr;
+
+	QLabel *actionsText_ = nullptr;
 
 	QPushButton *resetBtn_ = nullptr;
 	PropertiesPanel *props_ = nullptr;

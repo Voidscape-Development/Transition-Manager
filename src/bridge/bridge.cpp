@@ -13,6 +13,8 @@
 #include <QMetaObject>
 #include <QString>
 
+#include <set>
+
 namespace Bridge {
 
 static QMetaObject::Connection g_storeChanged;
@@ -71,6 +73,47 @@ void connect()
 			TransitionTreeDialog::ShowDialog();
 	};
 	managerHooks.usage = usageText;
+	managerHooks.exportRules = [](const std::vector<std::string> &transitions) {
+		std::set<std::string> names;
+		for (const std::string &t : transitions)
+			for (const std::string &preset : tt::FindTransitionUsage(t).presets)
+				names.insert(preset);
+		std::vector<const tt::Preset *> presets;
+		for (const tt::Preset &preset : tt::GetStore().presets)
+			if (names.count(preset.name))
+				presets.push_back(&preset);
+		if (presets.empty())
+			return std::string();
+		OBSDataAutoRelease data = tt::ExportPresets(presets);
+		return std::string(obs_data_get_json(data));
+	};
+	managerHooks.importRules = [](const std::string &json, const std::map<std::string, std::string> &renames) {
+		OBSDataAutoRelease data = obs_data_create_from_json(json.c_str());
+		std::vector<tt::Preset> imported;
+		std::string error;
+		if (!data || !tt::ImportPresets(data, imported, error))
+			return 0;
+		auto renamed = [&renames](std::string &name) {
+			auto it = renames.find(name);
+			if (it != renames.end())
+				name = it->second;
+		};
+		tt::Store &store = tt::GetStore();
+		for (tt::Preset &preset : imported) {
+			renamed(preset.defaultTransition);
+			for (tt::Mark &mark : preset.marks)
+				for (tt::Candidate &candidate : mark.candidates)
+					renamed(candidate.transition);
+			preset.global = false; // like the editor's import
+			preset.name = store.UniqueName(preset.name);
+			store.presets.push_back(preset);
+		}
+		store.Touch();
+		tt::RefreshPresetHotkeys();
+		tt::ApplyOverrides();
+		TransitionTreeDialog::NotifyDataChanged();
+		return (int)imported.size();
+	};
 	ManagerHooks::set(managerHooks);
 
 	tt::Integration treeHooks;

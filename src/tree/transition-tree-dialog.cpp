@@ -1101,6 +1101,24 @@ QWidget *TransitionTreeDialog::BuildMarkPage()
 	candidateGroup->setLayout(candidateLayout);
 	layout->addWidget(candidateGroup, 1);
 
+	auto *actionsGroup = new QGroupBox(Tr("Actions"));
+	auto *actionsLayout = new QHBoxLayout;
+	m_markActions = DimLabel();
+	m_markActions->setToolTip(Tr("Actions.Tooltip"));
+	actionsLayout->addWidget(m_markActions, 1);
+	auto *editActions = new QPushButton(Tr("Actions.Edit"));
+	editActions->setAutoDefault(false);
+	connect(editActions, &QPushButton::clicked, this, [this]() {
+		Mark *mark = SelectedMark();
+		if (!mark || !TransitionActions::edit(this, MarkTitle(*mark), mark->actions, true))
+			return;
+		m_markActions->setText(TransitionActions::summary(mark->actions));
+		CommitChange(false);
+	});
+	actionsLayout->addWidget(editActions);
+	actionsGroup->setLayout(actionsLayout);
+	layout->addWidget(actionsGroup);
+
 	page->setLayout(layout);
 	return page;
 }
@@ -1662,6 +1680,7 @@ void TransitionTreeDialog::RefreshMarkPage(Mark &mark)
 
 	m_modeCombo->setCurrentIndex((int)mark.mode);
 	m_markEnabled->setChecked(mark.enabled);
+	m_markActions->setText(TransitionActions::summary(mark.actions));
 
 	m_updating = false;
 
