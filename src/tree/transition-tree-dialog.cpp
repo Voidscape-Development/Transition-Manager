@@ -1111,15 +1111,9 @@ QWidget *TransitionTreeDialog::BuildBottomBar()
 	auto *layout = new QHBoxLayout;
 	layout->setContentsMargins(0, 0, 0, 0);
 
-	auto *credit = new QLabel("<a href=\"https://github.com/voidscape-development/transition-manager\">"
-				  "Transition Tree</a>, part of Transition Manager, by Voidscape Development");
-	credit->setObjectName("ttDim");
-	credit->setOpenExternalLinks(true);
-	layout->addWidget(credit, 1, Qt::AlignLeft);
-
 	auto *shortcuts = new QLabel(Tr("Shortcuts.Hint"));
 	shortcuts->setObjectName("ttDim");
-	layout->addWidget(shortcuts);
+	layout->addWidget(shortcuts, 1, Qt::AlignLeft);
 
 	if (GetIntegration().openHost) {
 		auto *hostButton = new QPushButton(Utf8(GetIntegration().hostName));
