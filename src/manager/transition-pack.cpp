@@ -77,8 +77,8 @@ using Files = QList<QPair<QString, QByteArray>>;
 QByteArray zip(const Files &files)
 {
 	QByteArray out, dir;
-	for (const auto &[name, data] : files) {
-		const QByteArray n = name.toUtf8();
+	for (const auto &file : files) {
+		const QByteArray n = file.first.toUtf8(), &data = file.second;
 		const quint32 crc = crc32(data), offset = (quint32)out.size();
 		auto header = [&](QByteArray &b, bool central) {
 			put(b, central ? 0x02014b50 : 0x04034b50, 4);
@@ -319,7 +319,8 @@ void importPack(QWidget *parent)
 	int added = 0;
 	QStringList skipped;
 	std::map<std::string, std::string> renames;
-	for (const QJsonValue &value : root.value("transitions").toArray()) {
+	const QJsonArray packed = root.value("transitions").toArray();
+	for (const QJsonValue value : packed) {
 		const QJsonObject t = value.toObject();
 		const QString name = t.value("name").toString();
 		const QByteArray type = t.value("type").toString().toUtf8();
