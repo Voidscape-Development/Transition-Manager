@@ -366,6 +366,12 @@ obs_data_t *SaveMark(const Mark &mark)
 	obs_data_set_array(data, "candidates", candidates);
 	obs_data_array_release(candidates);
 
+	if (!mark.actions.empty()) {
+		obs_data_t *actions = TransitionActions::save(mark.actions);
+		obs_data_set_obj(data, "actions", actions);
+		obs_data_release(actions);
+	}
+
 	return data;
 }
 
@@ -388,6 +394,10 @@ bool LoadMark(obs_data_t *data, Mark &mark)
 
 	LoadMatcher(data, "from", mark.from);
 	LoadMatcher(data, "to", mark.to);
+
+	obs_data_t *actions = obs_data_get_obj(data, "actions");
+	mark.actions = TransitionActions::load(actions);
+	obs_data_release(actions);
 
 	mark.candidates.clear();
 	obs_data_array_t *candidates = obs_data_get_array(data, "candidates");

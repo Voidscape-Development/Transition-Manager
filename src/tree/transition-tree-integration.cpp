@@ -305,6 +305,7 @@ void ModuleLoad()
 		QAction::connect(action, &QAction::triggered, []() { TransitionTreeDialog::ShowDialog(); });
 
 	EngineInit();
+	TransitionActions::setMarkResolver(ArmedActions);
 	proc_handler_add(obs_get_proc_handler(), kProcSignature, ProcGetTransition, nullptr);
 }
 
@@ -322,6 +323,7 @@ void ModuleUnload()
 	g_loaded = false;
 
 	UnhookTransitions();
+	TransitionActions::setMarkResolver(nullptr);
 	g_integration = Integration();
 	WebsocketShutdown();
 	EngineShutdown();

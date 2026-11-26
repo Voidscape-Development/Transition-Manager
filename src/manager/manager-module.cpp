@@ -1,5 +1,6 @@
 #include "manager-module.hpp"
 
+#include "../actions/transition-actions.hpp"
 #include "transition-manager-window.hpp"
 #include "transition-store.hpp"
 #include "transitions-dock.hpp"
@@ -13,10 +14,16 @@
 namespace ManagerModule {
 
 static QPointer<TransitionManagerWindow> g_window;
+static QMetaObject::Connection g_actionsHooks;
 
 bool load()
 {
 	TransitionStore::instance().init();
+	TransitionActions::init();
+	// Transitions added straight to OBS's list (OBS 31 and older) raise no
+	// list event, so follow the store too.
+	g_actionsHooks = QObject::connect(&TransitionStore::instance(), &TransitionStore::changed,
+					  [] { TransitionActions::refreshHooks(); });
 
 	auto *main = static_cast<QMainWindow *>(obs_frontend_get_main_window());
 
@@ -40,6 +47,8 @@ bool load()
 
 void unload()
 {
+	QObject::disconnect(g_actionsHooks);
+	TransitionActions::shutdown();
 	TransitionStore::instance().shutdown();
 }
 

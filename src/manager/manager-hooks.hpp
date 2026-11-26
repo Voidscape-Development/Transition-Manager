@@ -2,6 +2,9 @@
 
 #include <QString>
 #include <functional>
+#include <map>
+#include <string>
+#include <vector>
 #include <obs.h>
 
 // Optional extension points for the Transition Manager.
@@ -25,6 +28,12 @@ struct Hooks {
 	// (e.g. "Used by 3 rules in Transition Tree"), shown in the window's
 	// header and when confirming a removal. Empty when nothing does.
 	std::function<QString(obs_source_t *source)> usage;
+
+	// Transition packs: the Transition Tree presets that use any of
+	// `transitions`, as JSON (empty when none), and adding presets from that
+	// JSON with transitions renamed per `renames`. Returns how many were added.
+	std::function<std::string(const std::vector<std::string> &transitions)> exportRules;
+	std::function<int(const std::string &json, const std::map<std::string, std::string> &renames)> importRules;
 };
 
 // Replaces the current hooks.

@@ -1,11 +1,14 @@
 #include "transition-manager-window.hpp"
 
+#include "../actions/transition-actions.hpp"
 #include "manager-hooks.hpp"
 #include "media-probe.hpp"
 #include "properties-panel.hpp"
 #include "timeline-slider.hpp"
+#include "stinger-analyzer.hpp"
 #include "transition-dialogs.hpp"
 #include "transition-list.hpp"
+#include "transition-pack.hpp"
 #include "transition-preview.hpp"
 #include "transition-store.hpp"
 
@@ -210,6 +213,7 @@ TransitionManagerWindow::TransitionManagerWindow(QWidget *parent) : QWidget(pare
 		// Let go of everything that belongs to the outgoing collection.
 		stopPlayback(false);
 		probe_->cancel();
+		analyzer_->cancel();
 		preview_->releaseScenes();
 		if (pinnedBtn_->isChecked())
 			colorsBtn_->setChecked(true);
@@ -369,6 +373,7 @@ QWidget *TransitionManagerWindow::buildDetail()
 	left->setSpacing(16);
 	left->addWidget(buildPreviewCard());
 	left->addWidget(buildDurationCard());
+	left->addWidget(buildActionsCard());
 	left->addStretch();
 
 	body->addLayout(left, 3);
@@ -566,11 +571,54 @@ QWidget *TransitionManagerWindow::buildDurationCard()
 	fixedTitle->addStretch();
 	fixedText_ = roleLabel(QString(), "muted");
 	fixedText_->setWordWrap(true);
+	detectBtn_ = roleButton(tr("Detect transition point"), "secondary");
+	detectBtn_->setToolTip(tr("Plays the video privately and finds where it covers the screen the most"));
+	usePointBtn_ = roleButton(tr("Use it"), "primary");
+	detectText_ = roleLabel(QString(), "muted");
+	detectText_->setWordWrap(true);
+	detectRow_ = new QWidget;
+	auto *detect = new QHBoxLayout(detectRow_);
+	detect->setContentsMargins(0, 6, 0, 0);
+	detect->addWidget(detectBtn_);
+	detect->addWidget(detectText_, 1);
+	detect->addWidget(usePointBtn_);
 	fv->addLayout(fixedTitle);
 	fv->addWidget(fixedText_);
+	fv->addWidget(detectRow_);
 	outer->addWidget(fixed);
 	fixed->hide();
 
+	analyzer_ = new StingerAnalyzer(this);
+	connect(detectBtn_, &QPushButton::clicked, this, &TransitionManagerWindow::onDetect);
+	connect(analyzer_, &StingerAnalyzer::finished, this, [this](const StingerAnalyzer::Result &r) {
+		detectBtn_->setEnabled(true);
+		if (!isStinger(shown_))
+			return;
+		OBSDataAutoRelease settings = obs_source_get_settings(shown_);
+		const bool byFrame = obs_data_get_int(settings, "tp_type") == 1;
+		detectedPoint_ = r.error.isEmpty() ? (byFrame ? r.pointFrame : r.pointMs) : -1;
+		QString text = r.error;
+		if (detectedPoint_ >= 0)
+			text = (byFrame ? tr("Fully covered around frame %1.") : tr("Fully covered around %1 ms."))
+				       .arg(detectedPoint_);
+		if (!r.note.isEmpty())
+			text += QStringLiteral(" ") + r.note;
+		if (r.error.isEmpty() && r.audioChecked)
+			text += QStringLiteral(" ") + (r.hasAudio ? tr("Has sound.") : tr("No sound."));
+		detectText_->setText(text);
+		usePointBtn_->setVisible(detectedPoint_ >= 0);
+	});
+	connect(usePointBtn_, &QPushButton::clicked, this, [this] {
+		if (!isStinger(shown_) || detectedPoint_ < 0)
+			return;
+		OBSDataAutoRelease update = obs_data_create();
+		obs_data_set_int(update, "transition_point", detectedPoint_);
+		obs_source_update(shown_, update);
+		props_->refresh();
+		preview_->syncSettings(shown_);
+		usePointBtn_->setVisible(false);
+		updateStingerInfo();
+	});
 	connect(customBtn_, &QPushButton::toggled, this, &TransitionManagerWindow::onDurationModeChanged);
 	connect(durationSlider_, &QSlider::valueChanged, durationSpin_, &QSpinBox::setValue);
 	connect(durationSpin_, &QSpinBox::valueChanged, this, [this](int ms) {
@@ -585,6 +633,64 @@ void TransitionManagerWindow::showFixedDuration(bool fixed)
 {
 	durationAdjustable_->setVisible(!fixed);
 	durationFixed_->setVisible(fixed);
+}
+
+QWidget *TransitionManagerWindow::buildActionsCard()
+{
+	auto *frame = card();
+	auto *v = new QVBoxLayout(frame);
+	v->setContentsMargins(16, 14, 16, 16);
+	v->setSpacing(8);
+
+	auto *edit = roleButton(tr("Edit…"), "secondary");
+	auto *global = roleButton(tr("Global actions…"), "link");
+	global->setToolTip(tr("Actions that run for every transition"));
+	auto *titleRow = new QHBoxLayout;
+	titleRow->addWidget(roleLabel(tr("Actions"), "cardTitle"));
+	titleRow->addStretch();
+	titleRow->addWidget(global);
+	titleRow->addWidget(edit);
+	actionsText_ = roleLabel(QString(), "muted");
+	actionsText_->setWordWrap(true);
+	v->addLayout(titleRow);
+	v->addWidget(actionsText_);
+
+	connect(edit, &QPushButton::clicked, this, [this] {
+		if (!shown_)
+			return;
+		const std::string name = obs_source_get_name(shown_);
+		TransitionActions::ActionSet set = TransitionActions::forTransition(name);
+		if (TransitionActions::edit(this, QString::fromStdString(name), set, true))
+			TransitionActions::setForTransition(name, set);
+		updateActions();
+	});
+	connect(global, &QPushButton::clicked, this, [this] {
+		TransitionActions::ActionSet set = TransitionActions::global();
+		if (TransitionActions::edit(this, tr("Every transition"), set, false))
+			TransitionActions::setGlobal(set);
+		updateActions();
+	});
+	return frame;
+}
+
+void TransitionManagerWindow::updateActions()
+{
+	if (!shown_)
+		return;
+	const auto own = TransitionActions::forTransition(obs_source_get_name(shown_));
+	actionsText_->setText(tr("When this transition plays: %1. Every transition: %2.")
+				      .arg(TransitionActions::summary(own),
+					   TransitionActions::summary(TransitionActions::global(), false)));
+}
+
+void TransitionManagerWindow::onDetect()
+{
+	if (!isStinger(shown_))
+		return;
+	detectBtn_->setEnabled(false);
+	usePointBtn_->setVisible(false);
+	detectText_->setText(tr("Playing the video…"));
+	analyzer_->analyze(shown_);
 }
 
 QWidget *TransitionManagerWindow::buildSettingsCard()
@@ -703,6 +809,7 @@ void TransitionManagerWindow::hideEvent(QHideEvent *event)
 	// Closed: stop rendering the preview copy and drop its references.
 	stopPlayback(false);
 	probe_->cancel();
+	analyzer_->cancel();
 	preview_->setTransition(nullptr);
 	shown_ = nullptr;
 	shownName_.clear();
@@ -922,6 +1029,11 @@ void TransitionManagerWindow::onSelectionChanged()
 		stingerTotalMs_ = -1;
 		stingerFrames_ = 0;
 		stingerCut_ = -1.0;
+		analyzer_->cancel();
+		detectBtn_->setEnabled(true);
+		detectText_->clear();
+		usePointBtn_->setVisible(false);
+		detectRow_->setVisible(isStinger(source));
 		if (isStinger(source))
 			updateStingerInfo();
 		else
@@ -936,6 +1048,7 @@ void TransitionManagerWindow::onSelectionChanged()
 	updateDurationCard();
 	updateEndpoints();
 	updateStingerInfo();
+	updateActions();
 }
 
 // =============================================================================
@@ -1205,6 +1318,8 @@ void TransitionManagerWindow::populateNewMenu(QMenu *menu)
 				tr("Duplicate “%1”").arg(QString::fromUtf8(obs_source_get_name(source))), this,
 				&TransitionManagerWindow::onDuplicate);
 	}
+	menu->addSeparator();
+	menu->addAction(tr("Import Pack…"), this, [this] { TransitionPack::importPack(this); });
 }
 
 QMenu *TransitionManagerWindow::buildActionsMenu(QWidget *parent)
@@ -1229,6 +1344,18 @@ QMenu *TransitionManagerWindow::buildActionsMenu(QWidget *parent)
 		menu->addAction(ManagerHooks::get().openRulesLabel, this, [keep] { ManagerHooks::openRules(keep); });
 		menu->addSeparator();
 	}
+
+	menu->addAction(tr("Global Actions…"), this, [this] {
+		TransitionActions::ActionSet set = TransitionActions::global();
+		if (TransitionActions::edit(this, tr("Every transition"), set, false))
+			TransitionActions::setGlobal(set);
+		updateActions();
+	});
+	OBSSource keepForPack(source);
+	menu->addAction(tr("Export Pack…"), this,
+			[this, keepForPack] { TransitionPack::exportPack(this, keepForPack); });
+	menu->addAction(tr("Import Pack…"), this, [this] { TransitionPack::importPack(this); })->setEnabled(editable);
+	menu->addSeparator();
 
 	QAction *remove = menu->addAction(TMStyle::icon(QStringLiteral("trash"), colors_.text), tr("Remove"), this,
 					  &TransitionManagerWindow::onRemove);
